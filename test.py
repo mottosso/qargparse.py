@@ -10,8 +10,10 @@ _app = QtWidgets.QApplication(sys.argv)
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--interactive", action="store_true")
+parser.add_argument("--demo", action="store_true")
 
 opts = parser.parse_args()
+opts.interactive = opts.interactive or opts.demo
 
 logging.basicConfig(format="%(message)s")
 logging.getLogger().setLevel(logging.DEBUG)
@@ -60,6 +62,24 @@ with __auto__("All..") as parser:
         "Sorcerer",
         "Monk",
     ], default=2, help="Your class")
+
+    parser.add_argument("Options", type=qargparse.Separator)
+    parser.add_argument("paths", type=qargparse.MultiString, items=[
+        "Value A",
+        "Value B",
+        "Some other value",
+        "And finally, value C",
+    ])
+
+
+if opts.demo:
+    # Finish up here, if you're only looking to run the demo
+    exit(0)
+
+
+with __auto__("MultiString..") as parser:
+    parser.setDescription("Entering many items..")
+    parser.add_argument("paths", type=qargparse.MultiString)
 
 
 with __auto__("Enum..") as parser:

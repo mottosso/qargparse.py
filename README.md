@@ -2,21 +2,24 @@
 
 ![image](https://user-images.githubusercontent.com/2152766/58029512-ab005980-7b14-11e9-8161-d38e2ce3038c.png)
 
-Easily build settings-style user interfaces, using syntax akin to Python's [`argparse`]() module.
+Build settings-style graphical user interfaces with Python's [`argparse`](https://docs.python.org/3/library/argparse.html) syntax.
 
 **Features**
 
 - [x] Automatic user interface for settings-style GUIs
 - [x] Automatic tooltips from argument `help=`
-- [ ] Persistence to disk
-- [x] Automatic label from name
-- [x] Tab-support for transitioning between arguments
+- [x] Persistence to disk
 - [x] Rich selection of types
 - [x] Infer type from default value
 - [x] Imperative and declarative mode
+- [x] Tab-support for transitioning between arguments
+- [x] Automatic label from name
+- [x] Dual PEP8 and Qt syntax
 - [ ] Theme support
 - [ ] Min/max values for sliders
-- [ ] Wrap any command-line tool using `ArgumentParser` with a GUI
+- [ ] Wrap any instance of `argparse.ArgumentParser` with a GUI
+- [ ] Argument Icons, for extra flare
+- [ ] Argument Groups, e.g. tree view or side-panel
 
 <br>
 
@@ -37,6 +40,25 @@ In addition to being able to subclass and create your own widgets, these are the
 | `Color`     | An RGB or HSV color | ![](https://placehold.it/300x30)
 | `Button`    | A clickable button | ![](https://placehold.it/300x30)
 | `Toggle`    | A checkable button | ![](https://placehold.it/300x30)
+| `Enum`      | Multiple choice | ![](https://placehold.it/300x30)
+| `Separator` | A visual separation between subsequent arguments | ![](https://placehold.it/300x30)
+| `Multistring` | Multiple string-values | ![](https://placehold.it/300x30)
+| `Path` | A formatted string, with OS-specific file-browser | ![](https://placehold.it/300x30)
+| `EnvironmentVariable` | A key/value string with limited character support | ![](https://placehold.it/300x30)
+| `EnvironmentPath` | An `os.pathsep`-separated string | ![](https://placehold.it/300x30)
+| `Color` | A color with visual swatch and hex, HSV and RGB support | ![](https://placehold.it/300x30)
+| `Image` | A `Path` with thumbnail and restrictions on file extension | ![](https://placehold.it/300x30)
+
+<br>
+
+### Install
+
+qargparse.py is available on PyPI.
+
+```bash
+$ pip install qargparse.py
+$ python -m qargparse --demo
+```
 
 <br>
 
@@ -51,7 +73,7 @@ from qargparse import QArgumentParser
 
 app = QtWidgets.QApplication(sys.argv)
 
-parser = QArgumentParser()
+parser = QArgumentParser(description="My first graphical parser")
 parser.add_argument("name", type=str, help="Your name")
 parser.add_argument("age", type=int, help="Your age")
 parser.add_argument("height", type=float, help="Your height")
