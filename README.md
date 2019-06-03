@@ -42,7 +42,7 @@ In addition to being able to subclass and create your own widgets, these are the
 | `Toggle`    | A checkable button | ![](https://placehold.it/300x30)
 | `Enum`      | Multiple choice | ![](https://placehold.it/300x30)
 | `Separator` | A visual separation between subsequent arguments | ![](https://placehold.it/300x30)
-| `Multistring` | Multiple string-values | ![](https://placehold.it/300x30)
+| `List` | Multiple string-values | ![](https://placehold.it/300x30)
 | `Path` | A formatted string, with OS-specific file-browser | ![](https://placehold.it/300x30)
 | `EnvironmentVariable` | A key/value string with limited character support | ![](https://placehold.it/300x30)
 | `EnvironmentPath` | An `os.pathsep`-separated string | ![](https://placehold.it/300x30)
