@@ -105,6 +105,7 @@ class QArgumentParser(QtWidgets.QWidget):
             widget.setObjectName(arg["name"])  # useful in CSS
             widget.setProperty("type", type(arg).__name__)
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
+            widget.setEnabled(arg["enabled"])
 
         layout.addWidget(c0, self._row, 0, QtCore.Qt.AlignTop)
         layout.addWidget(c1, self._row, 1)
@@ -131,11 +132,12 @@ class QArgument(QtCore.QObject):
         super(QArgument, self).__init__(kwargs.pop("parent", None))
 
         kwargs["name"] = name
-        kwargs["label"] = kwargs.get("label", self.camelToTitle(name))
+        kwargs["label"] = kwargs.get("label", camel_to_title(name))
         kwargs["default"] = kwargs.get("default", None)
         kwargs["help"] = kwargs.get("help", "")
         kwargs["read"] = kwargs.get("read")
         kwargs["write"] = kwargs.get("write")
+        kwargs["enabled"] = bool(kwargs.get("enabled", True))
 
         self._data = kwargs
 
@@ -153,30 +155,6 @@ class QArgument(QtCore.QObject):
 
     def write(self, value):
         pass
-
-    def camelToTitle(self, text):
-        """Convert camelCase `text` to Title Case
-
-        Example:
-            >>> camelToTitle("mixedCase")
-            "Mixed Case"
-            >>> camelToTitle("myName")
-            "My Name"
-            >>> camelToTitle("you")
-            "You"
-            >>> camelToTitle("You")
-            "You"
-            >>> camelToTitle("This is That")
-            "This Is That"
-
-        """
-
-        return re.sub(
-            r"((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))",
-            r" \1", text
-        ).title()
-
-    camel_to_title = camelToTitle
 
 
 class Boolean(QArgument):
@@ -200,6 +178,11 @@ class Boolean(QArgument):
             state = {
                 0: QtCore.Qt.Unchecked,
                 1: QtCore.Qt.Checked,
+                2: QtCore.Qt.Checked,
+
+                "0": QtCore.Qt.Unchecked,
+                "1": QtCore.Qt.Checked,
+                "2": QtCore.Qt.Checked,
 
                 # May be stored as string, if used with QSettings(..IniFormat)
                 "false": QtCore.Qt.Unchecked,
@@ -305,29 +288,78 @@ class Toggle(Button):
     pass
 
 
-class List(QArgument):
+class InfoList(QArgument):
     def __init__(self, name, **kwargs):
-        kwargs["items"] = kwargs.get("items", ["No items"])
-        super(List, self).__init__(name, **kwargs)
+        kwargs["default"] = kwargs.get("default", ["Empty"])
+        super(InfoList, self).__init__(name, **kwargs)
 
     def create(self):
         label = QtWidgets.QLabel(self["name"])
         label.setAlignment(QtCore.Qt.AlignBottom)
 
-        def on_edited(topleft, bottomright, roles=None):
-            self.changed.emit()
+        class Model(QtCore.QStringListModel):
+            def data(self, index, role):
+                return super(Model, self).data(index, role)
+
+        model = QtCore.QStringListModel(self["default"])
+        widget = QtWidgets.QListView()
+        widget.setModel(model)
+        widget.setEditTriggers(widget.NoEditTriggers)
+
+        self.read = lambda: model.stringList()
+        self.write = lambda value: model.setStringList(value)
+
+        return label, widget
+
+
+class Choice(QArgument):
+    def __init__(self, name, **kwargs):
+        kwargs["items"] = kwargs.get("items", ["Empty"])
+        kwargs["default"] = kwargs.get("default", kwargs["items"][0])
+        super(Choice, self).__init__(name, **kwargs)
+
+    def index(self, value):
+        """Return numerical equivalent to self.read()"""
+        return self["items"].index(value)
+
+    def create(self):
+        label = QtWidgets.QLabel(self["name"])
+        label.setAlignment(QtCore.Qt.AlignBottom)
 
         class Model(QtCore.QStringListModel):
             def data(self, index, role):
                 return super(Model, self).data(index, role)
 
-        model = QtCore.QStringListModel(self["items"] + [""])
-        model.dataChanged.connect(on_edited)
+        def on_changed(selected, deselected):
+            selected = selected.indexes()[0]
+            value = selected.data(QtCore.Qt.DisplayRole)
+            self["current"] = value
+
+        def set_current(current):
+            options = model.stringList()
+            for index, member in enumerate(options):
+                if member == current:
+                    break
+            else:
+                raise ValueError("%s not a member of %s" % (current, self))
+
+            qindex = model.index(index, 0, QtCore.QModelIndex())
+            smodel = widget.selectionModel()
+            smodel.setCurrentIndex(qindex, smodel.Select)
+            self["current"] = options[index]
+
+        model = QtCore.QStringListModel(self["items"])
         widget = QtWidgets.QListView()
         widget.setModel(model)
+        widget.setEditTriggers(widget.NoEditTriggers)
+        smodel = widget.selectionModel()
+        smodel.selectionChanged.connect(on_changed)
 
-        self.read = lambda: model.stringList()
-        self.write = lambda value: model.setStringList(value)
+        self.read = lambda: self["current"]
+        self.write = lambda value: set_current(value)
+
+        if self["default"] is not None:
+            self.write(self["default"])
 
         return label, widget
 
@@ -402,6 +434,32 @@ QLabel[type="Separator"] {
 """
 
 
+def camelToTitle(text):
+    """Convert camelCase `text` to Title Case
+
+    Example:
+        >>> camelToTitle("mixedCase")
+        "Mixed Case"
+        >>> camelToTitle("myName")
+        "My Name"
+        >>> camelToTitle("you")
+        "You"
+        >>> camelToTitle("You")
+        "You"
+        >>> camelToTitle("This is That")
+        "This Is That"
+
+    """
+
+    return re.sub(
+        r"((?<=[a-z])[A-Z]|(?<!\A)[A-Z](?=[a-z]))",
+        r" \1", text
+    ).title()
+
+
+camel_to_title = camelToTitle
+
+
 def _demo():
     import sys
     app = QtWidgets.QApplication(sys.argv)
@@ -422,7 +480,7 @@ def _demo():
     ], default=2, help="Your class")
 
     parser.add_argument("options", type=Separator)
-    parser.add_argument("paths", type=List, items=[
+    parser.add_argument("paths", type=InfoList, items=[
         "Value A",
         "Value B",
         "Some other value",
