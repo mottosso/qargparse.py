@@ -4,9 +4,15 @@ import logging
 from collections import OrderedDict as odict
 from Qt import QtCore, QtWidgets
 
-__version__ = "0.5.0"
+__version__ = "0.5.1"
 _log = logging.getLogger(__name__)
-_type = type
+_type = type  # used as argument
+
+try:
+    # Python 2
+    _basestring = basestring
+except NameError:
+    _basestring = str
 
 
 class QArgumentParser(QtWidgets.QWidget):
@@ -42,7 +48,6 @@ class QArgumentParser(QtWidgets.QWidget):
             _log.info("Storing settings @ %s" % storage.fileName())
 
         arguments = arguments or []
-        description = QtWidgets.QLabel(description or "")
 
         assert hasattr(arguments, "__iter__"), "arguments must be iterable"
         assert isinstance(storage, (type(None), QtCore.QSettings)), (
@@ -50,8 +55,10 @@ class QArgumentParser(QtWidgets.QWidget):
         )
 
         layout = QtWidgets.QGridLayout(self)
-        layout.addWidget(description, 0, 0, 1, 2)
         layout.setRowStretch(999, 1)
+
+        if description:
+            layout.addWidget(QtWidgets.QLabel(description), 0, 0, 1, 2)
 
         self._row = 1
         self._storage = storage
@@ -93,22 +100,61 @@ class QArgumentParser(QtWidgets.QWidget):
             raise ValueError("Duplicate argument '%s'" % arg["name"])
 
         if self._storage is not None:
-            arg["default"] = self._storage.value(arg["name"]) or arg["default"]
+            default = self._storage.value(arg["name"])
 
-        arg.changed.connect(lambda: self.changed.emit(arg))
+            if default:
+                if isinstance(arg, Boolean):
+                    default = bool({
+                        None: QtCore.Qt.Unchecked,
 
-        layout = self.layout()
-        c0, c1 = arg.create()
+                        0: QtCore.Qt.Unchecked,
+                        1: QtCore.Qt.Checked,
+                        2: QtCore.Qt.Checked,
 
-        for widget in (c0, c1):
+                        "0": QtCore.Qt.Unchecked,
+                        "1": QtCore.Qt.Checked,
+                        "2": QtCore.Qt.Checked,
+
+                        # May be stored as string, if used with IniFormat
+                        "false": QtCore.Qt.Unchecked,
+                        "true": QtCore.Qt.Checked,
+                    }.get(default))
+
+                arg["default"] = default
+
+        arg.changed.connect(lambda: self.on_changed(arg))
+
+        label = (
+            QtWidgets.QLabel(arg["label"])
+            if arg.label
+            else QtWidgets.QLabel()
+        )
+        widget = arg.create()
+        reset = QtWidgets.QPushButton("")  # default
+        reset.setToolTip("Reset")
+        reset.setProperty("type", "reset")
+        reset.clicked.connect(lambda: self.on_reset(arg))
+
+        # Shown on edit
+        reset.hide()
+
+        for widget in (label, widget):
             widget.setToolTip(arg["help"])
             widget.setObjectName(arg["name"])  # useful in CSS
             widget.setProperty("type", type(arg).__name__)
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
             widget.setEnabled(arg["enabled"])
 
-        layout.addWidget(c0, self._row, 0, QtCore.Qt.AlignTop)
-        layout.addWidget(c1, self._row, 1)
+        layout = self.layout()
+        layout.addWidget(label, self._row, 0, QtCore.Qt.AlignTop)
+        layout.addWidget(widget, self._row, 1)
+        layout.addWidget(reset, self._row, 2, QtCore.Qt.AlignTop)
+        layout.setColumnStretch(1, 1)
+
+        def on_changed(*_):
+            reset.setVisible(arg["edited"])
+
+        arg.changed.connect(on_changed)
 
         self._row += 1
         self._arguments[arg["name"]] = arg
@@ -121,12 +167,22 @@ class QArgumentParser(QtWidgets.QWidget):
     def find(self, name):
         return self._arguments[name]
 
+    def on_reset(self, arg):
+        arg.write(arg["default"])
+
+    def on_changed(self, arg):
+        arg["edited"] = arg.read() != arg["default"]
+        self.changed.emit(arg)
+
     # Optional PEP08 syntax
     add_argument = addArgument
 
 
 class QArgument(QtCore.QObject):
     changed = QtCore.Signal()
+
+    # Provide a left-hand side label for this argument
+    label = True
 
     def __init__(self, name, **kwargs):
         super(QArgument, self).__init__(kwargs.pop("parent", None))
@@ -138,8 +194,15 @@ class QArgument(QtCore.QObject):
         kwargs["read"] = kwargs.get("read")
         kwargs["write"] = kwargs.get("write")
         kwargs["enabled"] = bool(kwargs.get("enabled", True))
+        kwargs["edited"] = False
 
         self._data = kwargs
+
+    def __str__(self):
+        return self["name"]
+
+    def __repr__(self):
+        return "%s(\"%s\")" % (type(self).__name__, self["name"])
 
     def __getitem__(self, key):
         return self._data[key]
@@ -147,24 +210,32 @@ class QArgument(QtCore.QObject):
     def __setitem__(self, key, value):
         self._data[key] = value
 
+    def __eq__(self, other):
+        if isinstance(other, _basestring):
+            return self["name"] == other
+        return super(QArgument, self).__eq__(other)
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
     def create(self):
-        return QtWidgets.QLabel(), QtWidgets.QWidget()
+        return QtWidgets.QWidget()
 
     def read(self):
-        pass
+        return self._read()
 
     def write(self, value):
-        pass
+        self._write(value)
+        self.changed.emit()
 
 
 class Boolean(QArgument):
     def create(self):
-        label = QtWidgets.QLabel(self["label"])
         widget = QtWidgets.QCheckBox()
         widget.clicked.connect(self.changed.emit)
 
         if isinstance(self, Tristate):
-            self.read = lambda: widget.checkState()
+            self._read = lambda: widget.checkState()
             state = {
                 0: QtCore.Qt.Unchecked,
                 1: QtCore.Qt.PartiallyChecked,
@@ -174,8 +245,10 @@ class Boolean(QArgument):
                 "2": QtCore.Qt.Checked,
             }
         else:
-            self.read = lambda: bool(widget.checkState())
+            self._read = lambda: bool(widget.checkState())
             state = {
+                None: QtCore.Qt.Unchecked,
+
                 0: QtCore.Qt.Unchecked,
                 1: QtCore.Qt.Checked,
                 2: QtCore.Qt.Checked,
@@ -189,12 +262,16 @@ class Boolean(QArgument):
                 "true": QtCore.Qt.Checked,
             }
 
-        self.write = lambda value: widget.setCheckState(state[value])
+        self._write = lambda value: widget.setCheckState(state[value])
+        widget.clicked.connect(self.changed.emit)
 
         if self["default"] is not None:
-            self.write(self["default"])
+            self._write(self["default"])
 
-        return label, widget
+        return widget
+
+    def read(self):
+        return self._read()
 
 
 class Tristate(QArgument):
@@ -203,21 +280,19 @@ class Tristate(QArgument):
 
 class Number(QArgument):
     def create(self):
-        label = QtWidgets.QLabel(self["label"])
-
         if isinstance(self, Float):
             widget = QtWidgets.QDoubleSpinBox()
         else:
             widget = QtWidgets.QSpinBox()
 
         widget.editingFinished.connect(self.changed.emit)
-        self.read = lambda: widget.value()
-        self.write = lambda value: widget.setValue(value)
+        self._read = lambda: widget.value()
+        self._write = lambda value: widget.setValue(value)
 
         if self["default"] is not None:
-            self.write(self["default"])
+            self._write(self["default"])
 
-        return label, widget
+        return widget
 
 
 class Integer(Number):
@@ -233,20 +308,32 @@ class Range(Number):
 
 
 class String(QArgument):
+    def __init__(self, *args, **kwargs):
+        super(String, self).__init__(*args, **kwargs)
+        self._previous = None
+
     def create(self):
-        label = QtWidgets.QLabel(self["label"])
         widget = QtWidgets.QLineEdit()
-        widget.editingFinished.connect(self.changed.emit)
-        self.read = lambda: widget.text()
-        self.write = lambda value: widget.setText(value)
+        widget.editingFinished.connect(self.onEditingFinished)
+        widget.returnPressed.connect(widget.editingFinished.emit)
+        self._read = lambda: widget.text()
+        self._write = lambda value: widget.setText(value)
 
         if isinstance(self, Info):
             widget.setReadOnly(True)
 
         if self["default"] is not None:
-            self.write(self["default"])
+            self._write(self["default"])
+            self._previous = self["default"]
 
-        return label, widget
+        return widget
+
+    def onEditingFinished(self):
+        current = self._read()
+
+        if current != self._previous:
+            self.changed.emit()
+            self._previous = current
 
 
 class Info(String):
@@ -258,8 +345,9 @@ class Color(String):
 
 
 class Button(QArgument):
+    label = False
+
     def create(self):
-        label = QtWidgets.QLabel()
         widget = QtWidgets.QPushButton(self["label"])
         widget.clicked.connect(self.changed.emit)
 
@@ -270,18 +358,18 @@ class Button(QArgument):
 
         if isinstance(self, Toggle):
             widget.setCheckable(True)
-            self.read = lambda: widget.checkState()
-            self.write = (
+            self._read = lambda: widget.checkState()
+            self._write = (
                 lambda value: widget.setCheckState(state[int(value)])
             )
         else:
-            self.read = lambda: "clicked"
-            self.write = lambda value: None
+            self._read = lambda: "clicked"
+            self._write = lambda value: None
 
         if self["default"] is not None:
-            self.write(self["default"])
+            self._write(self["default"])
 
-        return label, widget
+        return widget
 
 
 class Toggle(Button):
@@ -290,13 +378,10 @@ class Toggle(Button):
 
 class InfoList(QArgument):
     def __init__(self, name, **kwargs):
-        kwargs["default"] = kwargs.get("default", ["Empty"])
+        kwargs["default"] = kwargs.pop("default", ["Empty"])
         super(InfoList, self).__init__(name, **kwargs)
 
     def create(self):
-        label = QtWidgets.QLabel(self["name"])
-        label.setAlignment(QtCore.Qt.AlignBottom)
-
         class Model(QtCore.QStringListModel):
             def data(self, index, role):
                 return super(Model, self).data(index, role)
@@ -306,16 +391,16 @@ class InfoList(QArgument):
         widget.setModel(model)
         widget.setEditTriggers(widget.NoEditTriggers)
 
-        self.read = lambda: model.stringList()
-        self.write = lambda value: model.setStringList(value)
+        self._read = lambda: model.stringList()
+        self._write = lambda value: model.setStringList(value)
 
-        return label, widget
+        return widget
 
 
 class Choice(QArgument):
     def __init__(self, name, **kwargs):
         kwargs["items"] = kwargs.get("items", ["Empty"])
-        kwargs["default"] = kwargs.get("default", kwargs["items"][0])
+        kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
         super(Choice, self).__init__(name, **kwargs)
 
     def index(self, value):
@@ -323,45 +408,55 @@ class Choice(QArgument):
         return self["items"].index(value)
 
     def create(self):
-        label = QtWidgets.QLabel(self["name"])
-        label.setAlignment(QtCore.Qt.AlignBottom)
-
-        class Model(QtCore.QStringListModel):
-            def data(self, index, role):
-                return super(Model, self).data(index, role)
-
         def on_changed(selected, deselected):
-            selected = selected.indexes()[0]
+            try:
+                selected = selected.indexes()[0]
+            except IndexError:
+                # At least one item must be selected at all times
+                selected = deselected.indexes()[0]
+
             value = selected.data(QtCore.Qt.DisplayRole)
-            self["current"] = value
+            set_current(value)
+            self.changed.emit()
 
         def set_current(current):
             options = model.stringList()
-            for index, member in enumerate(options):
-                if member == current:
-                    break
+
+            if current == "Empty":
+                index = 0
             else:
-                raise ValueError("%s not a member of %s" % (current, self))
+                for index, member in enumerate(options):
+                    if member == current:
+                        break
+                else:
+                    raise ValueError(
+                        "%s not a member of %s" % (current, options)
+                    )
 
             qindex = model.index(index, 0, QtCore.QModelIndex())
-            smodel = widget.selectionModel()
-            smodel.setCurrentIndex(qindex, smodel.Select)
+            smodel.setCurrentIndex(qindex, smodel.ClearAndSelect)
             self["current"] = options[index]
 
-        model = QtCore.QStringListModel(self["items"])
+        def reset(items, default=None):
+            items = items or ["Empty"]
+            model.setStringList(items)
+            set_current(default or items[0])
+
+        model = QtCore.QStringListModel()
         widget = QtWidgets.QListView()
         widget.setModel(model)
         widget.setEditTriggers(widget.NoEditTriggers)
+        widget.setSelectionMode(widget.SingleSelection)
         smodel = widget.selectionModel()
         smodel.selectionChanged.connect(on_changed)
 
-        self.read = lambda: self["current"]
-        self.write = lambda value: set_current(value)
+        self._read = lambda: self["current"]
+        self._write = lambda value: set_current(value)
+        self.reset = reset
 
-        if self["default"] is not None:
-            self.write(self["default"])
+        reset(self["items"], self["default"])
 
-        return label, widget
+        return widget
 
 
 class Separator(QArgument):
@@ -378,19 +473,17 @@ class Separator(QArgument):
     """
 
     def create(self):
-        label = QtWidgets.QLabel(self["name"])
-        label.setAlignment(QtCore.Qt.AlignBottom)
         widget = QtWidgets.QWidget()
 
-        self.read = lambda: None
-        self.write = lambda value: None
+        self._read = lambda: None
+        self._write = lambda value: None
 
-        return label, widget
+        return widget
 
 
 class Enum(QArgument):
     def __init__(self, name, **kwargs):
-        kwargs["default"] = kwargs.get("default", 0)
+        kwargs["default"] = kwargs.pop("default", 0)
         kwargs["items"] = kwargs.get("items", [])
 
         assert isinstance(kwargs["items"], (tuple, list)), (
@@ -400,22 +493,25 @@ class Enum(QArgument):
         super(Enum, self).__init__(name, **kwargs)
 
     def create(self):
-        label = QtWidgets.QLabel(self["name"])
         widget = QtWidgets.QComboBox()
         widget.addItems(self["items"])
         widget.currentIndexChanged.connect(
             lambda index: self.changed.emit())
 
-        self.read = lambda: widget.currentText()
-        self.write = lambda value: widget.setCurrentIndex(value)
+        self._read = lambda: widget.currentText()
+        self._write = lambda value: widget.setCurrentIndex(value)
 
         if self["default"] is not None:
-            self.write(self["default"])
+            self._write(self["default"])
 
-        return label, widget
+        return widget
 
 
 style = """\
+QWidget {
+    /* Explicitly specify a size, to account for automatic HDPi */
+    font-size: 11px;
+}
 
 *[type="Button"] {
     text-align:left;
@@ -429,6 +525,11 @@ style = """\
 QLabel[type="Separator"] {
     min-height: 20px;
     text-decoration: underline;
+}
+
+QPushButton[type="reset"] {
+    max-width: 11px;
+    max-height: 11px;
 }
 
 """
