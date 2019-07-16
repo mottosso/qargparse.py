@@ -4,6 +4,23 @@
 
 Build settings-style graphical user interfaces with Python's [`argparse`](https://docs.python.org/3/library/argparse.html) syntax.
 
+```python
+import sys
+from Qt import QtWidgets
+from qargparse import QArgumentParser
+
+app = QtWidgets.QApplication(sys.argv)
+
+parser = QArgumentParser(description="My first graphical parser")
+parser.add_argument("name", type=str, help="Your name")
+parser.add_argument("age", type=int, help="Your age")
+parser.add_argument("height", type=float, help="Your height")
+parser.add_argument("alive", type=bool, help="Your state")
+parser.show()
+
+app.exec_()
+```
+
 **Features**
 
 - [x] Automatic user interface for settings-style GUIs
@@ -59,6 +76,8 @@ qargparse.py is available on PyPI.
 $ pip install qargparse.py
 $ python -m qargparse --demo
 ```
+
+> This also installs [Qt.py](https://github.com/mottosso/Qt.py) as a dependency. Skip this by passing `--no-deps` to `pip install`, not however that it is required in order for `qargparse.py` to run.
 
 <br>
 
