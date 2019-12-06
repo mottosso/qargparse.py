@@ -281,6 +281,8 @@ class Tristate(QArgument):
 
 
 class Number(QArgument):
+    default = 0
+
     def create(self):
         if isinstance(self, Float):
             widget = QtWidgets.QDoubleSpinBox()
@@ -295,7 +297,7 @@ class Number(QArgument):
         self._read = lambda: widget.value()
         self._write = lambda value: widget.setValue(value)
 
-        if self["default"] is not None:
+        if self["default"] != self.default:
             self._write(self["default"])
 
         return widget
