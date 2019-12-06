@@ -282,8 +282,12 @@ class Number(QArgument):
     def create(self):
         if isinstance(self, Float):
             widget = QtWidgets.QDoubleSpinBox()
+            widget.setMinimum(self._data.get("min", 0.0))
+            widget.setMaximum(self._data.get("max", 99.99))
         else:
             widget = QtWidgets.QSpinBox()
+            widget.setMinimum(self._data.get("min", 0))
+            widget.setMaximum(self._data.get("max", 99))
 
         widget.editingFinished.connect(self.changed.emit)
         self._read = lambda: widget.value()
