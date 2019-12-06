@@ -183,13 +183,15 @@ class QArgument(QtCore.QObject):
 
     # Provide a left-hand side label for this argument
     label = True
+    # For defining default value for each argument type
+    default = None
 
     def __init__(self, name, **kwargs):
         super(QArgument, self).__init__(kwargs.pop("parent", None))
 
         kwargs["name"] = name
         kwargs["label"] = kwargs.get("label", camel_to_title(name))
-        kwargs["default"] = kwargs.get("default", None)
+        kwargs["default"] = kwargs.get("default", self.default)
         kwargs["help"] = kwargs.get("help", "")
         kwargs["read"] = kwargs.get("read")
         kwargs["write"] = kwargs.get("write")
