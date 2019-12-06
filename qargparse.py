@@ -325,6 +325,7 @@ class String(QArgument):
 
         if isinstance(self, Info):
             widget.setReadOnly(True)
+        widget.setPlaceholderText(self._data.get("placeholder", ""))
 
         if self["default"] is not None:
             self._write(self["default"])
