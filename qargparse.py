@@ -2,7 +2,7 @@ import re
 import logging
 
 from collections import OrderedDict as odict
-from Qt import QtCore, QtWidgets
+from Qt import QtCore, QtWidgets, QtGui
 
 __version__ = "0.5.1"
 _log = logging.getLogger(__name__)
@@ -313,6 +313,45 @@ class Float(Number):
 
 class Range(Number):
     pass
+
+
+class Double3(QArgument):
+    default = (0, 0, 0)
+
+    def create(self):
+        widget = QtWidgets.QWidget()
+        layout = QtWidgets.QGridLayout(widget)
+        x, y, z = (self.child_arg(layout, i) for i in range(3))
+
+        self._read = lambda: (
+            float(x.text()), float(y.text()), float(z.text()))
+        self._write = lambda value: [
+            w.setText(str(float(v))) for w, v in zip([x, y, z], value)]
+
+        if self["default"] != self.default:
+            self._write(self["default"])
+
+        return widget
+
+    def child_arg(self, layout, index):
+        widget = QtWidgets.QLineEdit()
+        widget.setValidator(QtGui.QDoubleValidator())
+
+        default = str(float(self["default"][index]))
+        widget.setText(default)
+
+        def focusOutEvent(event):
+            if not widget.text():
+                widget.setText(default)  # Ensure value exists for `_read`
+            QtWidgets.QLineEdit.focusOutEvent(widget, event)
+        widget.focusOutEvent = focusOutEvent
+
+        widget.editingFinished.connect(self.changed.emit)
+        widget.returnPressed.connect(widget.editingFinished.emit)
+
+        layout.addWidget(widget, 0, index)
+
+        return widget
 
 
 class String(QArgument):
