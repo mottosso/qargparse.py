@@ -91,6 +91,10 @@ class QArgumentParser(QtWidgets.QWidget):
             tuple: Enum,
         }.get(type, type)
 
+        # Get default value from QArgument class if not provided
+        if default is None:
+            default = Argument.default
+
         arg = Argument(name, default=default, **kwargs)
         self._addArgument(arg)
         return arg
