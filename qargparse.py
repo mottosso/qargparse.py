@@ -149,10 +149,15 @@ class QArgumentParser(QtWidgets.QWidget):
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
             widget.setEnabled(arg["enabled"])
 
+        # Align label on top of row if widget is over two times heiger
+        height = (lambda w: w.sizeHint().height())
+        label_on_top = height(label) * 2 < height(widget)
+        alignment = (QtCore.Qt.AlignTop,) if label_on_top else ()
+
         layout = self.layout()
-        layout.addWidget(label, self._row, 0, QtCore.Qt.AlignTop)
+        layout.addWidget(label, self._row, 0, *alignment)
         layout.addWidget(widget, self._row, 1)
-        layout.addWidget(reset, self._row, 2, QtCore.Qt.AlignTop)
+        layout.addWidget(reset, self._row, 2, *alignment)
         layout.setColumnStretch(1, 1)
 
         def on_changed(*_):
