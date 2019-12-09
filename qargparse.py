@@ -324,7 +324,8 @@ class Double3(QArgument):
 
     def create(self):
         widget = QtWidgets.QWidget()
-        layout = QtWidgets.QGridLayout(widget)
+        layout = QtWidgets.QHBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
         x, y, z = (self.child_arg(layout, i) for i in range(3))
 
         self._read = lambda: (
@@ -353,7 +354,7 @@ class Double3(QArgument):
         widget.editingFinished.connect(self.changed.emit)
         widget.returnPressed.connect(widget.editingFinished.emit)
 
-        layout.addWidget(widget, 0, index)
+        layout.addWidget(widget)
 
         return widget
 
