@@ -635,6 +635,7 @@ def _demo():
         "Some other value",
         "And finally, value C",
     ])
+    parser.add_argument("location", type=Double3)
 
     parser.show()
     app.exec_()
