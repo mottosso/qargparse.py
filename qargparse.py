@@ -184,6 +184,8 @@ class QArgumentParser(QtWidgets.QWidget):
 
 
 class QArgument(QtCore.QObject):
+    """Base class of argument user interface
+    """
     changed = QtCore.Signal()
 
     # Provide a left-hand side label for this argument
@@ -237,6 +239,18 @@ class QArgument(QtCore.QObject):
 
 
 class Boolean(QArgument):
+    """Boolean type user interface
+
+    Presented by `QtWidgets.QCheckBox`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (bool, optional): Argument's default value, default None
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     def create(self):
         widget = QtWidgets.QCheckBox()
         widget.clicked.connect(self.changed.emit)
@@ -282,10 +296,11 @@ class Boolean(QArgument):
 
 
 class Tristate(QArgument):
-    pass
+    """Not implemented"""
 
 
 class Number(QArgument):
+    """Base class of numeric type user interface"""
     default = 0
 
     def create(self):
@@ -309,18 +324,61 @@ class Number(QArgument):
 
 
 class Integer(Number):
-    pass
+    """Integer type user interface
+
+    A subclass of `qargparse.Number`, presented by `QtWidgets.QSpinBox`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (int, optional): Argument's default value, default 0
+        min (int, optional): Argument's minimum value, default 0
+        max (int, optional): Argument's maximum value, default 99
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
 
 
 class Float(Number):
-    pass
+    """Float type user interface
+
+    A subclass of `qargparse.Number`, presented by `QtWidgets.QDoubleSpinBox`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (float, optional): Argument's default value, default 0.0
+        min (float, optional): Argument's minimum value, default 0.0
+        max (float, optional): Argument's maximum value, default 99.99
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
 
 
 class Range(Number):
-    pass
+    """Range type user interface
+
+    A subclass of `qargparse.Number`, not production ready.
+
+    """
 
 
 class Double3(QArgument):
+    """Double3 type user interface
+
+    Presented by three `QtWidgets.QLineEdit` widget with `QDoubleValidator`
+    installed.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (tuple or list, optional): Default (0, 0, 0).
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     default = (0, 0, 0)
 
     def create(self):
@@ -361,6 +419,19 @@ class Double3(QArgument):
 
 
 class String(QArgument):
+    """String type user interface
+
+    Presented by `QtWidgets.QLineEdit`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (str, optional): Argument's default value, default None
+        placeholder (str, optional): Placeholder message for the widget
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     def __init__(self, *args, **kwargs):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
@@ -391,14 +462,41 @@ class String(QArgument):
 
 
 class Info(String):
-    pass
+    """String type user interface but read-only
+
+    A subclass of `qargparse.String`, presented by `QtWidgets.QLineEdit`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (str, optional): Argument's default value, default None
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
 
 
 class Color(String):
-    pass
+    """Color type user interface
+
+    A subclass of `qargparse.String`, not production ready.
+
+    """
 
 
 class Button(QArgument):
+    """Button type user interface
+
+    Presented by `QtWidgets.QPushButton`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (bool, optional): Argument's default value, default None
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     label = False
 
     def create(self):
@@ -427,10 +525,26 @@ class Button(QArgument):
 
 
 class Toggle(Button):
-    pass
+    """Checkable `Button` type user interface
+
+    Presented by `QtWidgets.QPushButton`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        default (bool, optional): Argument's default value, default None
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
 
 
 class InfoList(QArgument):
+    """String list type user interface
+
+    Presented by `QtWidgets.QListView`, not production ready.
+
+    """
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", ["Empty"])
         super(InfoList, self).__init__(name, **kwargs)
@@ -452,6 +566,20 @@ class InfoList(QArgument):
 
 
 class Choice(QArgument):
+    """Argument user interface for selecting one from list
+
+    Presented by `QtWidgets.QListView`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        items (list, optional): List of strings for select, default `["Empty"]`
+        default (str, optional): Default item in `items`, use first of `items`
+            if not given.
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     def __init__(self, name, **kwargs):
         kwargs["items"] = kwargs.get("items", ["Empty"])
         kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
@@ -536,6 +664,20 @@ class Separator(QArgument):
 
 
 class Enum(QArgument):
+    """Argument user interface for selecting one from dropdown list
+
+    Presented by `QtWidgets.QComboBox`.
+
+    Arguments:
+        name (str): The name of argument
+        label (str, optional): Display name, convert from `name` if not given
+        help (str, optional): Tool tip message of this argument
+        items (list, optional): List of strings for select, default `[]`
+        default (int, optional): Index of default item, use first of `items`
+            if not given.
+        enabled (bool, optional): Whether to enable this widget, default True
+
+    """
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", 0)
         kwargs["items"] = kwargs.get("items", [])
