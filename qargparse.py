@@ -135,8 +135,8 @@ class QArgumentParser(QtWidgets.QWidget):
         reset.setProperty("type", "reset")
         reset.clicked.connect(lambda: self.on_reset(arg))
 
-        # Shown on edit
-        reset.hide()
+        # Enable on edit
+        reset.setEnabled(False)
 
         for widget in (label, widget):
             widget.setToolTip(arg["help"])
@@ -157,7 +157,7 @@ class QArgumentParser(QtWidgets.QWidget):
         layout.setColumnStretch(1, 1)
 
         def on_changed(*_):
-            reset.setVisible(arg["edited"])
+            reset.setEnabled(arg["edited"])
 
         arg.changed.connect(on_changed)
 
