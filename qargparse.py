@@ -63,7 +63,7 @@ class QArgumentParser(QtWidgets.QWidget):
         self._row = 1
         self._storage = storage
         self._arguments = odict()
-        self._desciption = description
+        self._description = description
 
         for arg in arguments or []:
             self._addArgument(arg)
@@ -71,7 +71,7 @@ class QArgumentParser(QtWidgets.QWidget):
         self.setStyleSheet(style)
 
     def setDescription(self, text):
-        self._desciption.setText(text)
+        self._description.setText(text)
 
     def addArgument(self, name, type=None, default=None, **kwargs):
         # Infer type from default
@@ -145,7 +145,7 @@ class QArgumentParser(QtWidgets.QWidget):
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
             widget.setEnabled(arg["enabled"])
 
-        # Align label on top of row if widget is over two times heiger
+        # Align label on top of row if widget is over two times higher
         height = (lambda w: w.sizeHint().height())
         label_on_top = height(label) * 2 < height(widget)
         alignment = (QtCore.Qt.AlignTop,) if label_on_top else ()
