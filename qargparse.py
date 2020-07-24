@@ -726,6 +726,11 @@ QLabel[type="Separator"] {
 QPushButton[type="reset"] {
     max-width: 11px;
     max-height: 11px;
+    /* Set padding to 0 for ensuring fixed size */
+    padding-top: 0px;
+    padding-bottom: 0px;
+    padding-left: 0px;
+    padding-right: 0px;
 }
 
 """
