@@ -72,6 +72,7 @@ class QArgumentParser(QtWidgets.QWidget):
         self.setStyleSheet(style)
 
     def setDescription(self, text):
+        # (TODO) This won't work.
         self._description.setText(text)
 
     def addArgument(self, name, type=None, default=None, **kwargs):
@@ -783,7 +784,7 @@ def _demo():
     parser.add_argument("age", default=33, help="Your age")
     parser.add_argument("height", default=1.87, help="Your height")
     parser.add_argument("alive", default=True, help="Your state")
-    parser.add_argument("class", type=Enum, items=[
+    parser.add_argument("class", type=Enum, items=[  # (TODO) Reset not hidden
         "Ranger",
         "Warrior",
         "Sorcerer",
@@ -791,7 +792,7 @@ def _demo():
     ], default=2, help="Your class")
 
     parser.add_argument("options", type=Separator)
-    parser.add_argument("paths", type=InfoList, items=[
+    parser.add_argument("paths", type=InfoList, items=[  # (TODO) Doesn't work
         "Value A",
         "Value B",
         "Some other value",
