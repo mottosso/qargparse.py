@@ -63,6 +63,7 @@ class QArgumentParser(QtWidgets.QWidget):
         self._row = 1
         self._storage = storage
         self._arguments = odict()
+        self._resets = dict()
         self._description = description
 
         for arg in arguments or []:
@@ -122,21 +123,13 @@ class QArgumentParser(QtWidgets.QWidget):
 
                 arg["default"] = default
 
-        arg.changed.connect(lambda: self.on_changed(arg))
-
+        # Argument label and editor widget
         label = (
             QtWidgets.QLabel(arg["label"])
             if arg.label
             else QtWidgets.QLabel()
         )
         widget = arg.create()
-        reset = QtWidgets.QPushButton("")  # default
-        reset.setToolTip("Reset")
-        reset.setProperty("type", "reset")
-        reset.clicked.connect(lambda: self.on_reset(arg))
-
-        # Enable on edit
-        reset.setEnabled(False)
 
         for widget in (label, widget):
             widget.setToolTip(arg["help"])
@@ -145,24 +138,36 @@ class QArgumentParser(QtWidgets.QWidget):
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
             widget.setEnabled(arg["enabled"])
 
+        # Reset btn widget
+        _reset = QtWidgets.QWidget()
+        _reset.setProperty("type", "QArgparse:reset")
+        reset = QtWidgets.QPushButton("")  # default
+        reset.setToolTip("Reset")
+        reset.hide()  # shown on edit
+
         # Align label on top of row if widget is over two times higher
         height = (lambda w: w.sizeHint().height())
         label_on_top = height(label) * 2 < height(widget)
         alignment = (QtCore.Qt.AlignTop,) if label_on_top else ()
 
+        # Layout
+        layout = QtWidgets.QVBoxLayout(_reset)
+        layout.addWidget(reset)
+        layout.setContentsMargins(0, 0, 0, 0)
+
         layout = self.layout()
         layout.addWidget(label, self._row, 0, *alignment)
         layout.addWidget(widget, self._row, 1)
-        layout.addWidget(reset, self._row, 2, *alignment)
+        layout.addWidget(_reset, self._row, 2, *alignment)
         layout.setColumnStretch(1, 1)
 
-        def on_changed(*_):
-            reset.setEnabled(arg["edited"])
-
-        arg.changed.connect(on_changed)
+        # Signals
+        reset.clicked.connect(lambda: arg.write(arg["default"]))
+        arg.changed.connect(lambda: self.on_changed(arg))
 
         self._row += 1
         self._arguments[arg["name"]] = arg
+        self._resets[arg["name"]] = reset
 
     def clear(self):
         assert self._storage, "Cannot clear without persistent storage"
@@ -172,11 +177,13 @@ class QArgumentParser(QtWidgets.QWidget):
     def find(self, name):
         return self._arguments[name]
 
-    def on_reset(self, arg):
-        arg.write(arg["default"])
-
     def on_changed(self, arg):
-        arg["edited"] = arg.read() != arg["default"]
+        is_edited = arg.read() != arg["default"]
+
+        reset = self._resets[arg["name"]]
+        reset.setVisible(is_edited)
+
+        arg["edited"] = is_edited
         self.changed.emit(arg)
 
     # Optional PEP08 syntax
@@ -723,10 +730,12 @@ QLabel[type="Separator"] {
     text-decoration: underline;
 }
 
-QPushButton[type="reset"] {
+QWidget[type="QArgparse:reset"] {
+    /* Ensure size fixed */
     max-width: 11px;
     max-height: 11px;
-    /* Set padding to 0 for ensuring fixed size */
+    min-width: 11px;
+    min-height: 11px;
     padding-top: 0px;
     padding-bottom: 0px;
     padding-left: 0px;
