@@ -1,10 +1,3 @@
-# NOT PRODUCTION READY
-
-There are a few kinks left and examples to make before this is generally useful.
-
-<br>
-<br>
-
 ### QArgparse
 
 ![image](https://user-images.githubusercontent.com/2152766/58029512-ab005980-7b14-11e9-8161-d38e2ce3038c.png)
@@ -40,7 +33,7 @@ app.exec_()
 - [x] Automatic label from name
 - [x] Dual PEP8 and Qt syntax
 - [ ] Theme support
-- [ ] Min/max values for sliders
+- [x] Min/max values for sliders
 - [ ] Wrap any instance of `argparse.ArgumentParser` with a GUI
 - [ ] Argument Icons, for extra flare
 - [ ] Argument Groups, e.g. tree view or side-panel
