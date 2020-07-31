@@ -140,8 +140,8 @@ class QArgumentParser(QtWidgets.QWidget):
             widget.setEnabled(arg["enabled"])
 
         # Reset btn widget
-        _reset = QtWidgets.QWidget()
-        _reset.setProperty("type", "QArgparse:reset")
+        reset_container = QtWidgets.QWidget()
+        reset_container.setProperty("type", "QArgparse:reset")
         reset = QtWidgets.QPushButton("")  # default
         reset.setToolTip("Reset")
         reset.hide()  # shown on edit
@@ -152,14 +152,14 @@ class QArgumentParser(QtWidgets.QWidget):
         alignment = (QtCore.Qt.AlignTop,) if label_on_top else ()
 
         # Layout
-        layout = QtWidgets.QVBoxLayout(_reset)
+        layout = QtWidgets.QVBoxLayout(reset_container)
         layout.addWidget(reset)
         layout.setContentsMargins(0, 0, 0, 0)
 
         layout = self.layout()
         layout.addWidget(label, self._row, 0, *alignment)
         layout.addWidget(widget, self._row, 1)
-        layout.addWidget(_reset, self._row, 2, *alignment)
+        layout.addWidget(reset_container, self._row, 2, *alignment)
         layout.setColumnStretch(1, 1)
 
         # Signals
