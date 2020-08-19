@@ -122,6 +122,12 @@ class QArgumentParser(QtWidgets.QWidget):
                         "true": QtCore.Qt.Checked,
                     }.get(default))
 
+                if isinstance(arg, Number):
+                    if isinstance(arg, Float):
+                        default = float(default)
+                    else:
+                        default = int(default)
+
                 arg["default"] = default
 
         # Argument label and editor widget
