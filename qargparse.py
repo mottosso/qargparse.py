@@ -4,7 +4,7 @@ import logging
 from collections import OrderedDict as odict
 from Qt import QtCore, QtWidgets, QtGui
 
-__version__ = "0.5.2"
+__version__ = "0.5.3"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 
@@ -121,6 +121,12 @@ class QArgumentParser(QtWidgets.QWidget):
                         "false": QtCore.Qt.Unchecked,
                         "true": QtCore.Qt.Checked,
                     }.get(default))
+
+                if isinstance(arg, Number):
+                    if isinstance(arg, Float):
+                        default = float(default)
+                    else:
+                        default = int(default)
 
                 arg["default"] = default
 
