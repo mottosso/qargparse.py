@@ -57,8 +57,9 @@ class QArgumentParser(QtWidgets.QWidget):
         layout = QtWidgets.QGridLayout(self)
         layout.setRowStretch(999, 1)
 
-        if description:
-            layout.addWidget(QtWidgets.QLabel(description), 0, 0, 1, 2)
+        description = QtWidgets.QLabel(description or "")
+        description.setVisible(bool(False))
+        layout.addWidget(description, 0, 0, 1, 2)
 
         self._row = 1
         self._storage = storage
@@ -72,8 +73,8 @@ class QArgumentParser(QtWidgets.QWidget):
         self.setStyleSheet(style)
 
     def setDescription(self, text):
-        # (TODO) This won't work.
-        self._description.setText(text)
+        self._description.setText(text or "")
+        self._description.setVisible(bool(text))
 
     def addArgument(self, name, type=None, default=None, **kwargs):
         # Infer type from default
