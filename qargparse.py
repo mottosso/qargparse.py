@@ -693,7 +693,7 @@ class Enum(QArgument):
 
     """
     def __init__(self, name, **kwargs):
-        kwargs["default"] = kwargs.pop("default", 0)
+        kwargs["default"] = kwargs.pop("default", None)
         kwargs["items"] = kwargs.get("items", [])
 
         assert isinstance(kwargs["items"], (tuple, list)), (
@@ -709,7 +709,7 @@ class Enum(QArgument):
             lambda index: self.changed.emit())
 
         self._read = lambda: widget.currentText()
-        self._write = lambda value: widget.setCurrentIndex(value)
+        self._write = lambda value: widget.setCurrentText(value)
 
         if self["default"] is not None:
             self._write(self["default"])
