@@ -687,8 +687,8 @@ class Enum(QArgument):
         label (str, optional): Display name, convert from `name` if not given
         help (str, optional): Tool tip message of this argument
         items (list, optional): List of strings for select, default `[]`
-        default (int, optional): Index of default item, use first of `items`
-            if not given.
+        default (int, str, optional): Index or text of default item, use first
+            of `items` if not given.
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
@@ -711,7 +711,16 @@ class Enum(QArgument):
         self._read = lambda: widget.currentText()
         self._write = lambda value: widget.setCurrentText(value)
 
-        if self["default"] is not None:
+        if self["default"] is not None and len(self["items"]):
+            if isinstance(self["default"], int):
+                index = self["default"]
+                index = 0 if index > len(self["items"]) else index
+                self["default"] = self["items"][index]
+            else:
+                # Must be str type. If the default str is not in list, will
+                # fallback to the first item silently.
+                pass
+
             self._write(self["default"])
 
         return widget
