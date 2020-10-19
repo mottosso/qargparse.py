@@ -4,7 +4,7 @@ import logging
 from collections import OrderedDict as odict
 from Qt import QtCore, QtWidgets, QtGui
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 
