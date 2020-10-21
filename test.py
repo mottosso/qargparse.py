@@ -64,7 +64,7 @@ with __auto__("All..") as parser:
     ], default=2, help="Your class")
 
     parser.add_argument("Options", type=qargparse.Separator)
-    parser.add_argument("paths", type=qargparse.MultiString, items=[
+    parser.add_argument("paths", type=qargparse.InfoList, items=[
         "Value A",
         "Value B",
         "Some other value",
@@ -77,13 +77,32 @@ if opts.demo:
     exit(0)
 
 
-with __auto__("MultiString..") as parser:
+with __auto__("InfoList..") as parser:
     parser.setDescription("Entering many items..")
-    parser.add_argument("paths", type=qargparse.MultiString)
+    parser.add_argument("paths", type=qargparse.InfoList, items=[
+        "Value A",
+        "Value B",
+        "Some other value",
+        "And finally, value C",
+    ])
 
 
 with __auto__("Enum..") as parser:
-    en = parser.add_argument("myOptions", default=1, items=["a", "b", "c"])
+    en = parser.add_argument("myOptions", default=1, items=["a", "b", "c"],
+                             type=qargparse.Enum)
+    assert en.read() == "b", en.read()
+
+
+with __auto__("Enum with string default..") as parser:
+    en = parser.add_argument("myOptions", default="b", items=["a", "b", "c"],
+                             type=qargparse.Enum)
+    assert en.read() == "b", en.read()
+
+
+with __auto__("Enum with fallback..") as parser:
+    en = parser.add_argument("myOptions", default=5, items=["a", "b", "c"],
+                             type=qargparse.Enum)
+    assert en.read() == "a", en.read()
 
 
 with __auto__("Defaults..") as parser:
