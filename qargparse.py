@@ -3,7 +3,6 @@ import types
 import logging
 
 from collections import OrderedDict as odict
-from Qt import QtCore, QtWidgets, QtGui
 
 __version__ = "0.5.6"
 _log = logging.getLogger(__name__)
@@ -14,6 +13,108 @@ try:
     _basestring = basestring
 except NameError:
     _basestring = str
+
+
+QtCompat = types.ModuleType("QtCompat")
+
+try:
+    from PySide2 import (
+        QtWidgets,
+        QtCore,
+        QtGui,
+    )
+
+    from shiboken2 import wrapInstance, getCppPointer
+    QtCompat.wrapInstance = wrapInstance
+    QtCompat.getCppPointer = getCppPointer
+
+    try:
+        from PySide2 import QtUiTools
+        QtCompat.loadUi = QtUiTools.QUiLoader
+
+    except ImportError:
+        _log.debug("QtUiTools not provided.")
+
+
+except ImportError:
+    try:
+        from PyQt5 import (
+            QtWidgets,
+            QtCore,
+            QtGui,
+        )
+
+        QtCore.Signal = QtCore.pyqtSignal
+        QtCore.Slot = QtCore.pyqtSlot
+        QtCore.Property = QtCore.pyqtProperty
+
+        from sip import wrapinstance, unwrapinstance
+        QtCompat.wrapInstance = wrapinstance
+        QtCompat.getCppPointer = unwrapinstance
+
+        try:
+            from PyQt5 import uic
+            QtCompat.loadUi = uic.loadUi
+        except ImportError:
+            _log.debug("uic not provided.")
+
+    except ImportError:
+        _log.error(
+            "Could not find either the required PySide2 or PyQt5"
+        )
+
+
+style = """\
+QWidget {
+    font-size: 8pt;
+}
+
+*[type="Button"] {
+    text-align:left;
+}
+
+*[type="Info"] {
+    background: transparent;
+    border: none;
+}
+
+QLabel[type="Separator"] {
+    min-height: 20px;
+    text-decoration: underline;
+}
+
+QWidget[type="QArgparse:reset"] {
+    /* Ensure size fixed */
+    max-width: 11px;
+    max-height: 11px;
+    min-width: 11px;
+    min-height: 11px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    padding-left: 0px;
+    padding-right: 0px;
+}
+
+"""
+
+
+def scaled_style(scale):
+    """Replace any mention of <num>px with scaled version
+
+    This way, you can still use px without worrying about what
+    it will look like at HDPI resolution.
+
+    """
+
+    output = []
+    for line in style.splitlines():
+        line = line.rstrip()
+        if line.endswith("px;"):
+            key, value = line.rsplit(" ", 1)
+            px = int(value[:-3]) * scale
+            line = "%s %dpx;" % (key, px)
+        output += [line]
+    return "\n".join(output)
 
 
 class QArgumentParser(QtWidgets.QWidget):
@@ -71,7 +172,28 @@ class QArgumentParser(QtWidgets.QWidget):
         for arg in arguments or []:
             self._addArgument(arg)
 
+    def showEvent(self, event):
+
+        # Account for showing with .show()
+        # and implicit show as child of another widget
+        super(QArgumentParser, self).showEvent(event)
+
+        # There isn't a window handle until *after* the widget has been shown
+        try:
+            scale = self._dpiScale()
+        except AttributeError:
+            # If for whatever reason we can't get scale at this time,
+            # that's fine, we'll just use some reasonable default
+            scale = 1.0
+
+        style = scaled_style(scale)
         self.setStyleSheet(style)
+
+    def _dpiScale(self):
+        """Scale used by OS for high-DPI/retina resolutions like 4K"""
+
+        # E.g. 1.5 or 2.0
+        return self.windowHandle().screen().logicalDotsPerInch() / 96.0
 
     def setDescription(self, text):
         self._description.setText(text or "")
@@ -267,6 +389,7 @@ class Boolean(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def create(self):
         widget = QtWidgets.QCheckBox()
 
@@ -447,6 +570,7 @@ class String(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, *args, **kwargs):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
@@ -560,6 +684,7 @@ class InfoList(QArgument):
     Presented by `QtWidgets.QListView`, not production ready.
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", ["Empty"])
         super(InfoList, self).__init__(name, **kwargs)
@@ -595,6 +720,7 @@ class Choice(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["items"] = kwargs.get("items", ["Empty"])
         kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
@@ -693,6 +819,7 @@ class Enum(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", None)
         kwargs["items"] = kwargs.get("items", [])
@@ -728,41 +855,6 @@ class Enum(QArgument):
             self._write(self["default"])
 
         return widget
-
-
-style = """\
-QWidget {
-    /* Explicitly specify a size, to account for automatic HDPi */
-    font-size: 11px;
-}
-
-*[type="Button"] {
-    text-align:left;
-}
-
-*[type="Info"] {
-    background: transparent;
-    border: none;
-}
-
-QLabel[type="Separator"] {
-    min-height: 20px;
-    text-decoration: underline;
-}
-
-QWidget[type="QArgparse:reset"] {
-    /* Ensure size fixed */
-    max-width: 11px;
-    max-height: 11px;
-    min-width: 11px;
-    min-height: 11px;
-    padding-top: 0px;
-    padding-bottom: 0px;
-    padding-left: 0px;
-    padding-right: 0px;
-}
-
-"""
 
 
 def camelToTitle(text):
