@@ -1,12 +1,14 @@
 import re
+import sys
 import types
 import logging
 
 from collections import OrderedDict as odict
 
-__version__ = "0.5.5"
+__version__ = "0.5.7"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
+_dpi = 1.0
 
 try:
     # Python 2
@@ -96,6 +98,11 @@ QWidget[type="QArgparse:reset"] {
 }
 
 """
+
+
+def px(value):
+    """Return a scaled value, for HDPI resolutions"""
+    return value * _dpi
 
 
 def scaled_style(scale):
@@ -193,7 +200,13 @@ class QArgumentParser(QtWidgets.QWidget):
         """Scale used by OS for high-DPI/retina resolutions like 4K"""
 
         # E.g. 1.5 or 2.0
-        return self.windowHandle().screen().logicalDotsPerInch() / 96.0
+        scale = self.windowHandle().screen().logicalDotsPerInch() / 96.0
+
+        # Store globally
+        module = sys.modules[__name__]
+        module._dpi = scale
+
+        return scale
 
     def setDescription(self, text):
         self._description.setText(text or "")
@@ -287,10 +300,26 @@ class QArgumentParser(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         layout = self.layout()
-        layout.addWidget(label, self._row, 0, *alignment)
-        layout.addWidget(widget, self._row, 1)
-        layout.addWidget(reset_container, self._row, 2, *alignment)
+
+        if isinstance(arg, Boolean):
+            # Right-align text to checkbox
+            _container = QtWidgets.QWidget()
+            _layout = QtWidgets.QHBoxLayout(_container)
+            _layout.addWidget(widget)
+            _layout.addWidget(label, 1, QtCore.Qt.AlignLeft)
+            _layout.setContentsMargins(px(2), px(2), px(2), px(2))
+
+            layout.addWidget(_container, self._row, 1)
+        else:
+            label.setText("\t%s:  " % label.text())
+            layout.addWidget(label, self._row, 0, QtCore.Qt.AlignRight)
+            layout.addWidget(widget, self._row, 1)
+
+        layout.addWidget(reset_container, self._row, 3, *alignment)
         layout.setColumnStretch(1, 1)
+
+        # Packed tightly on the vertical
+        layout.setSpacing(px(2))
 
         # Signals
         reset.clicked.connect(lambda: arg.write(arg["default"]))
@@ -343,6 +372,8 @@ class QArgument(QtCore.QObject):
         args["read"] = kwargs.pop("read", None)
         args["write"] = kwargs.pop("write", None)
         args["items"] = kwargs.pop("items", [])
+        args["min"] = kwargs.pop("min", 0)
+        args["max"] = kwargs.pop("max", 99)
         args["enabled"] = bool(kwargs.pop("enabled", True))
         args["edited"] = False
 
