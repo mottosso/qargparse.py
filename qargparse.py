@@ -267,6 +267,7 @@ class Boolean(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def create(self):
         widget = QtWidgets.QCheckBox()
         widget.clicked.connect(self.changed.emit)
@@ -448,6 +449,7 @@ class String(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, *args, **kwargs):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
@@ -561,6 +563,7 @@ class InfoList(QArgument):
     Presented by `QtWidgets.QListView`, not production ready.
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", ["Empty"])
         super(InfoList, self).__init__(name, **kwargs)
@@ -596,6 +599,7 @@ class Choice(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["items"] = kwargs.get("items", ["Empty"])
         kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
@@ -694,6 +698,7 @@ class Enum(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     def __init__(self, name, **kwargs):
         kwargs["default"] = kwargs.pop("default", None)
         kwargs["items"] = kwargs.get("items", [])
