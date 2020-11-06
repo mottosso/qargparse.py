@@ -99,6 +99,13 @@ QWidget[type="QArgparse:reset"] {
 
 
 def scaled_style(scale):
+    """Replace any mention of <num>px with scaled version
+
+    This way, you can still use px without worrying about what
+    it will look like at HDPI resolution.
+
+    """
+
     output = []
     for line in style.splitlines():
         line = line.rstrip()
