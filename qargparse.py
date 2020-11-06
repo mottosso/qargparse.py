@@ -3,7 +3,6 @@ import types
 import logging
 
 from collections import OrderedDict as odict
-from Qt import QtCore, QtWidgets, QtGui
 
 __version__ = "0.5.5"
 _log = logging.getLogger(__name__)
@@ -16,9 +15,57 @@ except NameError:
     _basestring = str
 
 
+QtCompat = types.ModuleType("QtCompat")
+
+try:
+    from PySide2 import (
+        QtWidgets,
+        QtCore,
+        QtGui,
+    )
+
+    from shiboken2 import wrapInstance, getCppPointer
+    QtCompat.wrapInstance = wrapInstance
+    QtCompat.getCppPointer = getCppPointer
+
+    try:
+        from PySide2 import QtUiTools
+        QtCompat.loadUi = QtUiTools.QUiLoader
+
+    except ImportError:
+        _log.debug("QtUiTools not provided.")
+
+
+except ImportError:
+    try:
+        from PyQt5 import (
+            QtWidgets,
+            QtCore,
+            QtGui,
+        )
+
+        QtCore.Signal = QtCore.pyqtSignal
+        QtCore.Slot = QtCore.pyqtSlot
+        QtCore.Property = QtCore.pyqtProperty
+
+        from sip import wrapinstance, unwrapinstance
+        QtCompat.wrapInstance = wrapinstance
+        QtCompat.getCppPointer = unwrapinstance
+
+        try:
+            from PyQt5 import uic
+            QtCompat.loadUi = uic.loadUi
+        except ImportError:
+            _log.debug("uic not provided.")
+
+    except ImportError:
+        _log.error(
+            "Could not find either the required PySide2 or PyQt5"
+        )
+
+
 style = """\
 QWidget {
-    /* Explicitly specify a size, to account for automatic HDPi */
     font-size: 8pt;
 }
 
@@ -49,6 +96,18 @@ QWidget[type="QArgparse:reset"] {
 }
 
 """
+
+
+def scaled_style(scale):
+    output = []
+    for line in style.splitlines():
+        line = line.rstrip()
+        if line.endswith("px;"):
+            key, value = line.rsplit(" ", 1)
+            px = int(value[:-3]) * scale
+            line = "%s %dpx;" % (key, px)
+        output += [line]
+    return "\n".join(output)
 
 
 class QArgumentParser(QtWidgets.QWidget):
@@ -106,6 +165,11 @@ class QArgumentParser(QtWidgets.QWidget):
         for arg in arguments or []:
             self._addArgument(arg)
 
+    def show(self):
+        super(QArgumentParser, self).show()
+
+        # There isn't a window handle until *after* the widget has been shown
+        style = scaled_style(self._dpiScale())
         self.setStyleSheet(style)
 
     def _dpiScale(self):
