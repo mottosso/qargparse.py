@@ -322,28 +322,38 @@ class QArgumentParser(QtWidgets.QWidget):
 
 
 class QArgument(QtCore.QObject):
-    """Base class of argument user interface
-    """
+    """Base class of argument user interface"""
+
     changed = QtCore.Signal()
 
     # Provide a left-hand side label for this argument
     label = True
+
     # For defining default value for each argument type
     default = None
 
     def __init__(self, name, default=None, **kwargs):
         super(QArgument, self).__init__(kwargs.pop("parent", None))
 
-        kwargs["name"] = name
-        kwargs["label"] = kwargs.get("label", camel_to_title(name))
-        kwargs["default"] = self.default if default is None else default
-        kwargs["help"] = kwargs.get("help", "")
-        kwargs["read"] = kwargs.get("read")
-        kwargs["write"] = kwargs.get("write")
-        kwargs["enabled"] = bool(kwargs.get("enabled", True))
-        kwargs["edited"] = False
+        args = {}
+        args["name"] = name
+        args["label"] = kwargs.pop("label", camel_to_title(name))
+        args["default"] = self.default if default is None else default
+        args["help"] = kwargs.pop("help", "")
+        args["read"] = kwargs.pop("read", None)
+        args["write"] = kwargs.pop("write", None)
+        args["items"] = kwargs.pop("items", [])
+        args["enabled"] = bool(kwargs.pop("enabled", True))
+        args["edited"] = False
 
-        self._data = kwargs
+        # Anything left is an error
+        for arg in kwargs:
+            raise TypeError(
+                "%s() got an unexpected keyword argument '%s' #"
+                % (type(self).__name__, arg)
+            )
+
+        self._data = args
 
     def __str__(self):
         return self["name"]
