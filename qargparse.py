@@ -856,7 +856,6 @@ class Enum(QArgument):
             index = None
 
             for idx, val in enumerate(items):
-                print(value, val)
                 if value == val:
                     index = idx
                     break
