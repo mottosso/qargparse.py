@@ -172,11 +172,21 @@ class QArgumentParser(QtWidgets.QWidget):
         for arg in arguments or []:
             self._addArgument(arg)
 
-    def show(self):
-        super(QArgumentParser, self).show()
+    def showEvent(self, event):
+
+        # Account for showing with .show()
+        # and implicit show as child of another widget
+        super(QArgumentParser, self).showEvent(event)
 
         # There isn't a window handle until *after* the widget has been shown
-        style = scaled_style(self._dpiScale())
+        try:
+            scale = self._dpiScale()
+        except AttributeError:
+            # If for whatever reason we can't get scale at this time,
+            # that's fine, we'll just use some reasonable default
+            scale = 1.0
+
+        style = scaled_style(scale)
         self.setStyleSheet(style)
 
     def _dpiScale(self):
