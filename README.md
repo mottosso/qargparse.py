@@ -77,7 +77,7 @@ $ pip install qargparse.py
 $ python -m qargparse --demo
 ```
 
-> This also installs [Qt.py](https://github.com/mottosso/Qt.py) as a dependency. Skip this by passing `--no-deps` to `pip install`, not however that it is required in order for `qargparse.py` to run.
+> This also installs [Qt.py](https://github.com/mottosso/Qt.py) as a dependency. Skip this by passing `--no-deps` to `pip install`, note however that Qt.py is required in order for `qargparse.py` to run.
 
 <br>
 
