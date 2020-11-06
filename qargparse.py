@@ -16,6 +16,41 @@ except NameError:
     _basestring = str
 
 
+style = """\
+QWidget {
+    /* Explicitly specify a size, to account for automatic HDPi */
+    font-size: 8pt;
+}
+
+*[type="Button"] {
+    text-align:left;
+}
+
+*[type="Info"] {
+    background: transparent;
+    border: none;
+}
+
+QLabel[type="Separator"] {
+    min-height: 20px;
+    text-decoration: underline;
+}
+
+QWidget[type="QArgparse:reset"] {
+    /* Ensure size fixed */
+    max-width: 11px;
+    max-height: 11px;
+    min-width: 11px;
+    min-height: 11px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    padding-left: 0px;
+    padding-right: 0px;
+}
+
+"""
+
+
 class QArgumentParser(QtWidgets.QWidget):
     """User interface arguments
 
@@ -72,6 +107,12 @@ class QArgumentParser(QtWidgets.QWidget):
             self._addArgument(arg)
 
         self.setStyleSheet(style)
+
+    def _dpiScale(self):
+        """Scale used by OS for high-DPI/retina resolutions like 4K"""
+
+        # E.g. 1.5 or 2.0
+        return self.windowHandle().screen().logicalDotsPerInch() / 96.0
 
     def setDescription(self, text):
         self._description.setText(text or "")
@@ -734,41 +775,6 @@ class Enum(QArgument):
             self._write(self["default"])
 
         return widget
-
-
-style = """\
-QWidget {
-    /* Explicitly specify a size, to account for automatic HDPi */
-    font-size: 11px;
-}
-
-*[type="Button"] {
-    text-align:left;
-}
-
-*[type="Info"] {
-    background: transparent;
-    border: none;
-}
-
-QLabel[type="Separator"] {
-    min-height: 20px;
-    text-decoration: underline;
-}
-
-QWidget[type="QArgparse:reset"] {
-    /* Ensure size fixed */
-    max-width: 11px;
-    max-height: 11px;
-    min-width: 11px;
-    min-height: 11px;
-    padding-top: 0px;
-    padding-bottom: 0px;
-    padding-left: 0px;
-    padding-right: 0px;
-}
-
-"""
 
 
 def camelToTitle(text):
