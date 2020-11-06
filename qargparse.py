@@ -832,8 +832,8 @@ class Enum(QArgument):
     """
 
     def __init__(self, name, **kwargs):
-        kwargs["default"] = kwargs.pop("default", None)
-        kwargs["items"] = kwargs.get("items", [])
+        kwargs["items"] = kwargs.get("items", ["Default"])
+        kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
 
         _enum_types = (tuple, list, types.GeneratorType)
         assert isinstance(kwargs["items"], _enum_types), (
@@ -851,7 +851,20 @@ class Enum(QArgument):
             lambda index: self.changed.emit())
 
         self._read = lambda: widget.currentText()
-        self._write = lambda value: widget.setCurrentText(value)
+
+        def _write(value):
+            index = None
+
+            for idx, val in enumerate(items):
+                print(value, val)
+                if value == val:
+                    index = idx
+                    break
+
+            assert index is not None, "%s isn't an option" % value
+            widget.setCurrentIndex(index)
+
+        self._write = _write
 
         if self["default"] is not None and len(items):
             if isinstance(self["default"], int):
