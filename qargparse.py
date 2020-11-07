@@ -105,6 +105,10 @@ QWidget[type="QArgparse:reset"] {
     padding-right: 0px;
 }
 
+#description, #icon {
+    padding-bottom: 10px;
+}
+
 """
 
 
@@ -154,6 +158,9 @@ def _scaled_stylesheet():
     return "\n".join(output)
 
 
+DoNothing = None
+
+
 class QArgumentParser(QtWidgets.QWidget):
     """User interface arguments
 
@@ -199,15 +206,25 @@ class QArgumentParser(QtWidgets.QWidget):
         layout = QtWidgets.QGridLayout(self)
         layout.setRowStretch(999, 1)
 
+        icon = QtWidgets.QLabel()
         description = QtWidgets.QLabel(description or "")
-        description.setVisible(bool(False))
-        layout.addWidget(description, 0, 0, 1, 2)
+        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
+        layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
+
+        # Shown when set
+        icon.setVisible(False)
+        description.setVisible(bool(description.text()))
+
+        # For CSS
+        icon.setObjectName("icon")
+        description.setObjectName("description")
 
         self._row = 1
         self._storage = storage
         self._arguments = odict()
         self._resets = dict()
         self._description = description
+        self._icon = icon
         self._style = style or DefaultStyle
 
         for arg in arguments or []:
@@ -241,6 +258,10 @@ class QArgumentParser(QtWidgets.QWidget):
     def setDescription(self, text):
         self._description.setText(text or "")
         self._description.setVisible(bool(text))
+
+    def setIcon(self, fname):
+        self._icon.setPixmap(QtGui.QPixmap(fname))
+        self._icon.setVisible(bool(fname))
 
     def addArgument(self, name, type=None, default=None, **kwargs):
         # Infer type from default
@@ -320,7 +341,7 @@ class QArgumentParser(QtWidgets.QWidget):
         reset_container = QtWidgets.QWidget()
         reset_container.setProperty("type", "QArgparse:reset")
         reset = QtWidgets.QPushButton("")  # default
-        reset.setToolTip("Reset")
+        reset.setToolTip("Reset to %s" % arg["default"])
         reset.hide()  # shown on edit
 
         # Align label on top of row if widget is over two times higher
@@ -355,11 +376,19 @@ class QArgumentParser(QtWidgets.QWidget):
 
         # Signals
         reset.pressed.connect(lambda: arg.write(arg["default"]))
+
+        # Prevent button from getting stuck in down-state, since
+        # it is hidden right after having been pressed
+        reset.pressed.connect(lambda: reset.setDown(False))
+
         arg.changed.connect(lambda: self.on_changed(arg))
 
         self._row += 1
         self._arguments[arg["name"]] = arg
         self._resets[arg["name"]] = reset
+
+        # Establish initial state, taking "initial" value into account
+        self.on_changed(arg)
 
     def clear(self):
         assert self._storage, "Cannot clear without persistent storage"
@@ -400,6 +429,7 @@ class QArgument(QtCore.QObject):
         args["name"] = name
         args["label"] = kwargs.pop("label", camel_to_title(name))
         args["default"] = self.default if default is None else default
+        args["initial"] = kwargs.pop("initial", None)
         args["help"] = kwargs.pop("help", "")
         args["read"] = kwargs.pop("read", None)
         args["write"] = kwargs.pop("write", None)
@@ -497,8 +527,13 @@ class Boolean(QArgument):
         self._write = lambda value: widget.setCheckState(state[value])
         widget.clicked.connect(self.changed.emit)
 
-        if self["default"] is not None:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -594,8 +629,13 @@ class Number(QArgument):
         self._read = lambda: widget.value()
         self._write = lambda value: widget.setValue(value)
 
-        if self["default"] != self.default:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
 
         return container
 
@@ -655,8 +695,8 @@ class Range(Number):
 class Double3(QArgument):
     """Double3 type user interface
 
-    Presented by three `QtWidgets.QLineEdit` widget with `QDoubleValidator`
-    installed.
+    Presented by three `QtWidgets.QLineEdit` widget
+    with `QDoubleValidator` installed.
 
     Arguments:
         name (str): The name of argument
@@ -666,6 +706,7 @@ class Double3(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     default = (0, 0, 0)
 
     def create(self):
@@ -679,8 +720,13 @@ class Double3(QArgument):
         self._write = lambda value: [
             w.setText(str(float(v))) for w, v in zip([x, y, z], value)]
 
-        if self["default"] != self.default:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
 
         return widget
 
@@ -735,9 +781,14 @@ class String(QArgument):
             widget.setReadOnly(True)
         widget.setPlaceholderText(self._data.get("placeholder", ""))
 
-        if self["default"] is not None:
-            self._write(self["default"])
-            self._previous = self["default"]
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
+            self._previous = initial
 
         return widget
 
@@ -806,8 +857,13 @@ class Button(QArgument):
             self._read = lambda: "clicked"
             self._write = lambda value: None
 
-        if self["default"] is not None:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -850,6 +906,14 @@ class InfoList(QArgument):
 
         self._read = lambda: model.stringList()
         self._write = lambda value: model.setStringList(value)
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -1011,22 +1075,30 @@ class Enum(QArgument):
                     index = idx
                     break
 
-            assert index is not None, "%s isn't an option" % value
+            assert index is not None, (
+                "%r isn't an option for '%s'" % (value, self["name"])
+            )
+
             widget.setCurrentIndex(index)
 
         self._write = _write
 
-        if self["default"] is not None and len(items):
-            if isinstance(self["default"], int):
-                index = self["default"]
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None and len(items):
+            if isinstance(initial, int):
+                index = initial
                 index = 0 if index > len(items) else index
-                self["default"] = items[index]
+                initial = items[index]
             else:
                 # Must be str type. If the default str is not in list, will
                 # fallback to the first item silently.
                 pass
 
-            self._write(self["default"])
+            self._write(initial)
 
         return widget if fillWidth else container
 

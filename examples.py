@@ -30,8 +30,10 @@ class BindSkinOptions(QtWidgets.QMainWindow):
         edit = header.addMenu("&Edit")
         hlp = header.addMenu("&Help")
 
-        edit.addAction("Save Settings")
-        edit.addAction("Reset Settings")
+        save = edit.addAction("Save Settings")
+        save.setEnabled(False)
+        reset = edit.addAction("Reset Settings")
+        reset.triggered.connect(self.on_reset)
         hlp.addAction("Help on Bind Skin Options")
 
         layout = QtWidgets.QHBoxLayout(footer)
@@ -54,10 +56,17 @@ class BindSkinOptions(QtWidgets.QMainWindow):
             qargparse.Enum("weightDistribution", items=["Distance",
                                                         "Neighbors"]),
             qargparse.Boolean("allowMultipleBindPoses", default=True),
-            qargparse.Integer("maxInfluences", default=5, min=1, max=30),
-            qargparse.Boolean("maintainMaxInfluences", default=True),
+            qargparse.Integer("maxInfluences", default=5, min=1, max=30,
+                              initial=12),
+            qargparse.Boolean("maintainMaxInfluences",
+
+                              # Value resetted to
+                              default=True,
+
+                              # Initial value on launch, differs from default
+                              initial=False),
             qargparse.Boolean("removeUnusedInfluences", default=True),
-            qargparse.Boolean("colorizeSkeleton", default=True),
+            qargparse.Boolean("colorizeSkeleton", default=True, initial=False),
             qargparse.Boolean("includeHiddenSelectionsOnCreation",
                               default=False),
             qargparse.Float("falloff", min=0.0, max=1.0, default=0.2),
@@ -73,7 +82,12 @@ class BindSkinOptions(QtWidgets.QMainWindow):
         layout.addWidget(parser)
         layout.addWidget(footer)
 
+        self._parser = parser
         self.setCentralWidget(central)
+
+    def on_reset(self):
+        for arg in self._parser:
+            arg.write(arg["default"])
 
     def on_changed(self, arg):
         print("%s changed to %s" % (arg["name"], arg.read()))
