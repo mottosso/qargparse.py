@@ -33,6 +33,7 @@ app.exec_()
 - [x] Automatic label from name
 - [x] Dual PEP8 and Qt syntax
 - [ ] Theme support
+- [x] HDPI support
 - [x] Min/max values for sliders
 - [ ] Wrap any instance of `argparse.ArgumentParser` with a GUI
 - [ ] Argument Icons, for extra flare
@@ -76,14 +77,12 @@ In addition to being able to subclass and create your own widgets, these are the
 
 ### Install
 
-qargparse.py is available on PyPI.
+Download or copy/paste [qargparse.py](https://github.com/mottosso/qargparse.py/archive/master.zip) into your project, there are no dependencies.
 
 ```bash
-$ pip install qargparse.py
+# Test it from a command-line like this
 $ python -m qargparse --demo
 ```
-
-> This also installs [Qt.py](https://github.com/mottosso/Qt.py) as a dependency. Skip this by passing `--no-deps` to `pip install`, note however that Qt.py is required in order for `qargparse.py` to run.
 
 <br>
 
