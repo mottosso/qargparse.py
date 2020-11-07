@@ -1,5 +1,4 @@
 import re
-import sys
 import types
 import logging
 
@@ -8,7 +7,7 @@ from collections import OrderedDict as odict
 __version__ = "0.5.7"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
-_dpi = 1.0
+_dpi = None
 
 try:
     # Python 2
@@ -66,7 +65,7 @@ except ImportError:
         )
 
 
-style = """\
+_stylesheet = """\
 QWidget {
     font-size: 8pt;
 }
@@ -102,10 +101,32 @@ QWidget[type="QArgparse:reset"] {
 
 def px(value):
     """Return a scaled value, for HDPI resolutions"""
+
+    global _dpi
+
+    if not _dpi:
+        # We can get system DPI from a window handle,
+        # but I haven't figured out how to get a window handle
+        # without first making a widget. So here we make one
+        # as invisibly as we can, as an invisible tooltip.
+        # This doesn't create a taskbar icon nor changes focus
+        # and in fact *should* happen without any noticeable effect
+        # to the user. Welcome to provide a less naughty alternative
+        any_widget = QtWidgets.QWidget()
+        any_widget.setWindowFlags(QtCore.Qt.ToolTip)
+        any_widget.show()
+        window = any_widget.windowHandle()
+
+        # E.g. 1.5 or 2.0
+        scale = window.screen().logicalDotsPerInch() / 96.0
+
+        # Store for later
+        _dpi = scale
+
     return value * _dpi
 
 
-def scaled_style(scale):
+def _scaled_stylesheet():
     """Replace any mention of <num>px with scaled version
 
     This way, you can still use px without worrying about what
@@ -114,14 +135,21 @@ def scaled_style(scale):
     """
 
     output = []
-    for line in style.splitlines():
+    for line in _stylesheet.splitlines():
         line = line.rstrip()
         if line.endswith("px;"):
             key, value = line.rsplit(" ", 1)
-            px = int(value[:-3]) * scale
-            line = "%s %dpx;" % (key, px)
+            value = px(int(value[:-3]))
+            line = "%s %dpx;" % (key, value)
         output += [line]
     return "\n".join(output)
+
+
+DefaultStyle = {
+
+    # Should comboboxes cover the full horizontal width?
+    "comboboxFillWidth": False,
+}
 
 
 class QArgumentParser(QtWidgets.QWidget):
@@ -141,6 +169,7 @@ class QArgumentParser(QtWidgets.QWidget):
                  arguments=None,
                  description=None,
                  storage=None,
+                 style=None,
                  parent=None):
         super(QArgumentParser, self).__init__(parent)
         self.setAttribute(QtCore.Qt.WA_StyledBackground)
@@ -175,38 +204,35 @@ class QArgumentParser(QtWidgets.QWidget):
         self._arguments = odict()
         self._resets = dict()
         self._description = description
+        self._style = style or DefaultStyle
 
         for arg in arguments or []:
             self._addArgument(arg)
 
-    def showEvent(self, event):
+        # Prevent getting squashed on the vertical
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.MinimumExpanding)
 
-        # Account for showing with .show()
-        # and implicit show as child of another widget
-        super(QArgumentParser, self).showEvent(event)
+        self.setStyleSheet(_scaled_stylesheet())
 
-        # There isn't a window handle until *after* the widget has been shown
-        try:
-            scale = self._dpiScale()
-        except AttributeError:
-            # If for whatever reason we can't get scale at this time,
-            # that's fine, we'll just use some reasonable default
-            scale = 1.0
+    def __iter__(self):
+        """Make parser iterable
 
-        style = scaled_style(scale)
-        self.setStyleSheet(style)
+        Arguments yield in the order they were added.
 
-    def _dpiScale(self):
-        """Scale used by OS for high-DPI/retina resolutions like 4K"""
+        Example
+            >>> args = [Float("age"), Boolean("alive")]
+            >>> parser = QArgumentParser(args)
+            >>> for arg in parser:
+            ...     print(arg["name"])
+            ...
+            age
+            alive
 
-        # E.g. 1.5 or 2.0
-        scale = self.windowHandle().screen().logicalDotsPerInch() / 96.0
+        """
 
-        # Store globally
-        module = sys.modules[__name__]
-        module._dpi = scale
-
-        return scale
+        for _, arg in self._arguments.items():
+            yield arg
 
     def setDescription(self, text):
         self._description.setText(text or "")
@@ -268,12 +294,12 @@ class QArgumentParser(QtWidgets.QWidget):
                 arg["default"] = default
 
         # Argument label and editor widget
-        label = (
-            QtWidgets.QLabel(arg["label"])
-            if arg.label
-            else QtWidgets.QLabel()
-        )
-        widget = arg.create()
+        label = QtWidgets.QLabel(arg["label"])
+
+        if isinstance(arg, Enum):
+            widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
+        else:
+            widget = arg.create()
 
         for widget in (label, widget):
             widget.setToolTip(arg["help"])
@@ -301,25 +327,23 @@ class QArgumentParser(QtWidgets.QWidget):
 
         layout = self.layout()
 
-        if isinstance(arg, Boolean):
-            # Right-align text to checkbox
-            _container = QtWidgets.QWidget()
-            _layout = QtWidgets.QHBoxLayout(_container)
-            _layout.addWidget(widget)
-            _layout.addWidget(label, 1, QtCore.Qt.AlignLeft)
-            _layout.setContentsMargins(px(2), px(2), px(2), px(2))
+        #  ___________________________________________
+        # |         |                         |       |
+        # |  label  | editor                  | reset |
+        # |_________|_________________________|_______|
+        #
 
-            layout.addWidget(_container, self._row, 1)
-        else:
-            label.setText("\t%s:  " % label.text())
+        if not isinstance(arg, Boolean):
+            # Checkboxes have their own label to the right
             layout.addWidget(label, self._row, 0, QtCore.Qt.AlignRight)
-            layout.addWidget(widget, self._row, 1)
 
-        layout.addWidget(reset_container, self._row, 3, *alignment)
+        layout.addWidget(widget, self._row, 1)
+        layout.addWidget(reset_container, self._row, 2, *alignment)
         layout.setColumnStretch(1, 1)
 
         # Packed tightly on the vertical
-        layout.setSpacing(px(2))
+        layout.setHorizontalSpacing(px(10))
+        layout.setVerticalSpacing(px(2))
 
         # Signals
         reset.clicked.connect(lambda: arg.write(arg["default"]))
@@ -432,7 +456,7 @@ class Boolean(QArgument):
     """
 
     def create(self):
-        widget = QtWidgets.QCheckBox()
+        widget = QtWidgets.QCheckBox(self._data["label"])
         widget.clicked.connect(self.changed.emit)
 
         if isinstance(self, Tristate):
@@ -873,13 +897,26 @@ class Enum(QArgument):
 
         super(Enum, self).__init__(name, **kwargs)
 
-    def create(self):
+    def create(self, fillWidth=True):
         items = list(self["items"])
 
         widget = QtWidgets.QComboBox()
         widget.addItems(items)
         widget.currentIndexChanged.connect(
             lambda index: self.changed.emit())
+
+        # Comboboxes aren't allowed to stretch without
+        # the choices also being stretched
+        container = QtWidgets.QWidget()
+
+        if not fillWidth:
+            layout = QtWidgets.QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            # Shrink to smallest horizontal size
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                 QtWidgets.QSizePolicy.Fixed)
+            layout.addWidget(widget, 1, QtCore.Qt.AlignLeft)
 
         self._read = lambda: widget.currentText()
 
@@ -908,7 +945,7 @@ class Enum(QArgument):
 
             self._write(self["default"])
 
-        return widget
+        return widget if fillWidth else container
 
 
 def camelToTitle(text):
@@ -949,7 +986,7 @@ def _demo():
     parser.add_argument("age", default=33, help="Your age")
     parser.add_argument("height", default=1.87, help="Your height")
     parser.add_argument("alive", default=True, help="Your state")
-    parser.add_argument("class", type=Enum, items=[  # (TODO) Reset not hidden
+    parser.add_argument("class", type=Enum, items=[
         "Ranger",
         "Warrior",
         "Sorcerer",
