@@ -67,12 +67,16 @@ class BindSkinOptions(QtWidgets.QMainWindow):
         ]
 
         parser = qargparse.QArgumentParser(args)
+        parser.changed.connect(self.on_changed)
 
         layout = QtWidgets.QVBoxLayout(central)
         layout.addWidget(parser)
         layout.addWidget(footer)
 
         self.setCentralWidget(central)
+
+    def on_changed(self, arg):
+        print("%s changed to %s" % (arg["name"], arg.read()))
 
 
 if __name__ == '__main__':

@@ -1,8 +1,16 @@
 import re
 import types
 import logging
-
 from collections import OrderedDict as odict
+
+# User-specified style, either write to this directly,
+# or copy it and pass it to QArgumentParser(style=yourStyle)
+DefaultStyle = {
+
+    # Should comboboxes cover the full horizontal width?
+    "comboboxFillWidth": False,
+}
+
 
 __version__ = "0.5.7"
 _log = logging.getLogger(__name__)
@@ -16,6 +24,7 @@ except NameError:
     _basestring = str
 
 
+# Support for both PyQt5 and PySide2
 QtCompat = types.ModuleType("QtCompat")
 
 try:
@@ -145,13 +154,6 @@ def _scaled_stylesheet():
     return "\n".join(output)
 
 
-DefaultStyle = {
-
-    # Should comboboxes cover the full horizontal width?
-    "comboboxFillWidth": False,
-}
-
-
 class QArgumentParser(QtWidgets.QWidget):
     """User interface arguments
 
@@ -160,6 +162,8 @@ class QArgumentParser(QtWidgets.QWidget):
         description (str, optional): Long-form text of what this parser is for
         storage (QSettings, optional): Persistence to disk, providing
             value() and setValue() methods
+        style (dict, optional): User-specified overrides to style choices
+        parent (QWidget, optional): Parent of this widget
 
     """
 
@@ -267,6 +271,10 @@ class QArgumentParser(QtWidgets.QWidget):
         if self._storage is not None:
             default = self._storage.value(arg["name"])
 
+            # Qt's native storage doesn't handle booleans
+            # in either of the Python bindings, so we need
+            # some jujitsu here to translate values it gives
+            # us into something useful to Python
             if default:
                 if isinstance(arg, Boolean):
                     default = bool({
@@ -502,28 +510,104 @@ class Tristate(QArgument):
     """Not implemented"""
 
 
+class FractionSlider(QtWidgets.QSlider):
+    """Slider capable of sliding between whole numbers
+
+    Qt, surprisingly, doesn't provide this out of the box
+
+    """
+
+    _floatValueChanged = QtCore.Signal(float)
+
+    def __init__(self, steps=100, parent=None):
+        super(FractionSlider, self).__init__(parent=parent)
+
+        self.steps = steps
+
+        self.valueChanged.connect(self._onValueChanged)
+
+        # Masquerade as native signal, now that we're connected
+        # to and will translate that into a float value
+        self.valueChanged = self._floatValueChanged
+
+    def _onValueChanged(self, value):
+        self._floatValueChanged.emit(value / float(self.steps))
+
+    def setMinimum(self, value):
+        super(FractionSlider, self).setMinimum(value * self.steps)
+
+    def setMaximum(self, value):
+        super(FractionSlider, self).setMaximum(value * self.steps)
+
+    def setValue(self, value):
+        super(FractionSlider, self).setValue(value * self.steps)
+
+    def value(self):
+        return super(FractionSlider, self).value() / float(self.steps)
+
+
 class Number(QArgument):
     """Base class of numeric type user interface"""
     default = 0
 
     def create(self):
         if isinstance(self, Float):
+            slider = FractionSlider()
             widget = QtWidgets.QDoubleSpinBox()
             widget.setMinimum(self._data.get("min", 0.0))
             widget.setMaximum(self._data.get("max", 99.99))
+
+            # Account for small values
+            delta = widget.maximum() - widget.minimum()
+
+            if delta < 10:
+                stepsize = 0.1
+
+            widget.setSingleStep(stepsize)
+
         else:
+            slider = QtWidgets.QSlider()
             widget = QtWidgets.QSpinBox()
             widget.setMinimum(self._data.get("min", 0))
             widget.setMaximum(self._data.get("max", 99))
 
+        widget.setMinimumWidth(px(50))
+
+        container = QtWidgets.QWidget()
+        slider.setMaximum(widget.maximum())
+        slider.setMinimum(widget.minimum())
+        slider.setOrientation(QtCore.Qt.Horizontal)
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.addWidget(slider)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._slider = slider
+        self._widget = widget
+
+        # Synchonise spinbox with slider
         widget.editingFinished.connect(self.changed.emit)
+        widget.valueChanged.connect(self.on_spinbox_changed)
+        slider.valueChanged.connect(self.on_slider_changed)
+
         self._read = lambda: widget.value()
         self._write = lambda value: widget.setValue(value)
 
         if self["default"] != self.default:
             self._write(self["default"])
 
-        return widget
+        return container
+
+    def on_spinbox_changed(self, value):
+        self._slider.setValue(value)
+        # Spinbox emits a signal all on its own
+
+    def on_slider_changed(self, value):
+        self._widget.setValue(value)
+
+        # Help spinbox emit this change
+        self.changed.emit()
 
 
 class Integer(Number):
