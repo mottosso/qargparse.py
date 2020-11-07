@@ -457,7 +457,6 @@ class Boolean(QArgument):
 
     def create(self):
         widget = QtWidgets.QCheckBox(self._data["label"])
-        widget.clicked.connect(self.changed.emit)
 
         if isinstance(self, Tristate):
             self._read = lambda: widget.checkState()
