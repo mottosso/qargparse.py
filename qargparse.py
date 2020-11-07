@@ -383,6 +383,9 @@ class QArgumentParser(QtWidgets.QWidget):
 
         arg.changed.connect(lambda: self.on_changed(arg))
 
+        # Take ownership for clean deletion alongside parser
+        arg.setParent(self)
+
         self._row += 1
         self._arguments[arg["name"]] = arg
         self._resets[arg["name"]] = reset
@@ -399,12 +402,10 @@ class QArgumentParser(QtWidgets.QWidget):
         return self._arguments[name]
 
     def on_changed(self, arg):
-        is_edited = arg.read() != arg["default"]
-
         reset = self._resets[arg["name"]]
-        reset.setVisible(is_edited)
+        reset.setVisible(arg.isEdited())
 
-        arg["edited"] = is_edited
+        arg["edited"] = arg.isEdited()
         self.changed.emit(arg)
 
     # Optional PEP08 syntax
@@ -467,6 +468,9 @@ class QArgument(QtCore.QObject):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def isEdited(self):
+        return self.read() != self["default"]
 
     def create(self):
         return QtWidgets.QWidget()
@@ -1070,10 +1074,15 @@ class Enum(QArgument):
         def _write(value):
             index = None
 
-            for idx, val in enumerate(items):
-                if value == val:
-                    index = idx
-                    break
+            # Support passing an index directly
+            if isinstance(value, int):
+                index = value
+
+            else:
+                for idx, val in enumerate(items):
+                    if value == val:
+                        index = idx
+                        break
 
             assert index is not None, (
                 "%r isn't an option for '%s'" % (value, self["name"])
@@ -1101,6 +1110,15 @@ class Enum(QArgument):
             self._write(initial)
 
         return widget if fillWidth else container
+
+    def isEdited(self):
+        default = self["default"]
+
+        # Account for integer defaults
+        if isinstance(default, int):
+            default = self["items"][self["default"]]
+
+        return self.read() != default
 
 
 def camelToTitle(text):
