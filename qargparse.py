@@ -346,7 +346,7 @@ class QArgumentParser(QtWidgets.QWidget):
         layout.setVerticalSpacing(px(2))
 
         # Signals
-        reset.clicked.connect(lambda: arg.write(arg["default"]))
+        reset.pressed.connect(lambda: arg.write(arg["default"]))
         arg.changed.connect(lambda: self.on_changed(arg))
 
         self._row += 1
