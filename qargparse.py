@@ -1,12 +1,21 @@
 import re
 import types
 import logging
-
 from collections import OrderedDict as odict
 
-__version__ = "0.5.6"
+# User-specified style, either write to this directly,
+# or copy it and pass it to QArgumentParser(style=yourStyle)
+DefaultStyle = {
+
+    # Should comboboxes cover the full horizontal width?
+    "comboboxFillWidth": False,
+}
+
+
+__version__ = "0.5.7"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
+_dpi = None
 
 try:
     # Python 2
@@ -15,6 +24,7 @@ except NameError:
     _basestring = str
 
 
+# Support for both PyQt5 and PySide2
 QtCompat = types.ModuleType("QtCompat")
 
 try:
@@ -64,7 +74,7 @@ except ImportError:
         )
 
 
-style = """\
+_stylesheet = """\
 QWidget {
     font-size: 8pt;
 }
@@ -95,10 +105,41 @@ QWidget[type="QArgparse:reset"] {
     padding-right: 0px;
 }
 
+#description, #icon {
+    padding-bottom: 10px;
+}
+
 """
 
 
-def scaled_style(scale):
+def px(value):
+    """Return a scaled value, for HDPI resolutions"""
+
+    global _dpi
+
+    if not _dpi:
+        # We can get system DPI from a window handle,
+        # but I haven't figured out how to get a window handle
+        # without first making a widget. So here we make one
+        # as invisibly as we can, as an invisible tooltip.
+        # This doesn't create a taskbar icon nor changes focus
+        # and in fact *should* happen without any noticeable effect
+        # to the user. Welcome to provide a less naughty alternative
+        any_widget = QtWidgets.QWidget()
+        any_widget.setWindowFlags(QtCore.Qt.ToolTip)
+        any_widget.show()
+        window = any_widget.windowHandle()
+
+        # E.g. 1.5 or 2.0
+        scale = window.screen().logicalDotsPerInch() / 96.0
+
+        # Store for later
+        _dpi = scale
+
+    return value * _dpi
+
+
+def _scaled_stylesheet():
     """Replace any mention of <num>px with scaled version
 
     This way, you can still use px without worrying about what
@@ -107,14 +148,17 @@ def scaled_style(scale):
     """
 
     output = []
-    for line in style.splitlines():
+    for line in _stylesheet.splitlines():
         line = line.rstrip()
         if line.endswith("px;"):
             key, value = line.rsplit(" ", 1)
-            px = int(value[:-3]) * scale
-            line = "%s %dpx;" % (key, px)
+            value = px(int(value[:-3]))
+            line = "%s %dpx;" % (key, value)
         output += [line]
     return "\n".join(output)
+
+
+DoNothing = None
 
 
 class QArgumentParser(QtWidgets.QWidget):
@@ -125,6 +169,8 @@ class QArgumentParser(QtWidgets.QWidget):
         description (str, optional): Long-form text of what this parser is for
         storage (QSettings, optional): Persistence to disk, providing
             value() and setValue() methods
+        style (dict, optional): User-specified overrides to style choices
+        parent (QWidget, optional): Parent of this widget
 
     """
 
@@ -134,6 +180,7 @@ class QArgumentParser(QtWidgets.QWidget):
                  arguments=None,
                  description=None,
                  storage=None,
+                 style=None,
                  parent=None):
         super(QArgumentParser, self).__init__(parent)
         self.setAttribute(QtCore.Qt.WA_StyledBackground)
@@ -159,45 +206,62 @@ class QArgumentParser(QtWidgets.QWidget):
         layout = QtWidgets.QGridLayout(self)
         layout.setRowStretch(999, 1)
 
+        icon = QtWidgets.QLabel()
         description = QtWidgets.QLabel(description or "")
-        description.setVisible(bool(False))
-        layout.addWidget(description, 0, 0, 1, 2)
+        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
+        layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
+
+        # Shown when set
+        icon.setVisible(False)
+        description.setVisible(bool(description.text()))
+
+        # For CSS
+        icon.setObjectName("icon")
+        description.setObjectName("description")
 
         self._row = 1
         self._storage = storage
         self._arguments = odict()
         self._resets = dict()
         self._description = description
+        self._icon = icon
+        self._style = style or DefaultStyle
 
         for arg in arguments or []:
             self._addArgument(arg)
 
-    def showEvent(self, event):
+        # Prevent getting squashed on the vertical
+        self.setSizePolicy(QtWidgets.QSizePolicy.Preferred,
+                           QtWidgets.QSizePolicy.MinimumExpanding)
 
-        # Account for showing with .show()
-        # and implicit show as child of another widget
-        super(QArgumentParser, self).showEvent(event)
+        self.setStyleSheet(_scaled_stylesheet())
 
-        # There isn't a window handle until *after* the widget has been shown
-        try:
-            scale = self._dpiScale()
-        except AttributeError:
-            # If for whatever reason we can't get scale at this time,
-            # that's fine, we'll just use some reasonable default
-            scale = 1.0
+    def __iter__(self):
+        """Make parser iterable
 
-        style = scaled_style(scale)
-        self.setStyleSheet(style)
+        Arguments yield in the order they were added.
 
-    def _dpiScale(self):
-        """Scale used by OS for high-DPI/retina resolutions like 4K"""
+        Example
+            >>> args = [Float("age"), Boolean("alive")]
+            >>> parser = QArgumentParser(args)
+            >>> for arg in parser:
+            ...     print(arg["name"])
+            ...
+            age
+            alive
 
-        # E.g. 1.5 or 2.0
-        return self.windowHandle().screen().logicalDotsPerInch() / 96.0
+        """
+
+        for _, arg in self._arguments.items():
+            yield arg
 
     def setDescription(self, text):
         self._description.setText(text or "")
         self._description.setVisible(bool(text))
+
+    def setIcon(self, fname):
+        self._icon.setPixmap(QtGui.QPixmap(fname))
+        self._icon.setVisible(bool(fname))
 
     def addArgument(self, name, type=None, default=None, **kwargs):
         # Infer type from default
@@ -228,6 +292,10 @@ class QArgumentParser(QtWidgets.QWidget):
         if self._storage is not None:
             default = self._storage.value(arg["name"])
 
+            # Qt's native storage doesn't handle booleans
+            # in either of the Python bindings, so we need
+            # some jujitsu here to translate values it gives
+            # us into something useful to Python
             if default:
                 if isinstance(arg, Boolean):
                     default = bool({
@@ -255,12 +323,12 @@ class QArgumentParser(QtWidgets.QWidget):
                 arg["default"] = default
 
         # Argument label and editor widget
-        label = (
-            QtWidgets.QLabel(arg["label"])
-            if arg.label
-            else QtWidgets.QLabel()
-        )
-        widget = arg.create()
+        label = QtWidgets.QLabel(arg["label"])
+
+        if isinstance(arg, Enum):
+            widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
+        else:
+            widget = arg.create()
 
         for widget in (label, widget):
             widget.setToolTip(arg["help"])
@@ -273,7 +341,7 @@ class QArgumentParser(QtWidgets.QWidget):
         reset_container = QtWidgets.QWidget()
         reset_container.setProperty("type", "QArgparse:reset")
         reset = QtWidgets.QPushButton("")  # default
-        reset.setToolTip("Reset")
+        reset.setToolTip("Reset to %s" % arg["default"])
         reset.hide()  # shown on edit
 
         # Align label on top of row if widget is over two times higher
@@ -287,18 +355,43 @@ class QArgumentParser(QtWidgets.QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         layout = self.layout()
-        layout.addWidget(label, self._row, 0, *alignment)
+
+        #  ___________________________________________
+        # |         |                         |       |
+        # |  label  | editor                  | reset |
+        # |_________|_________________________|_______|
+        #
+
+        if not isinstance(arg, Boolean):
+            # Checkboxes have their own label to the right
+            layout.addWidget(label, self._row, 0, QtCore.Qt.AlignRight)
+
         layout.addWidget(widget, self._row, 1)
         layout.addWidget(reset_container, self._row, 2, *alignment)
         layout.setColumnStretch(1, 1)
 
+        # Packed tightly on the vertical
+        layout.setHorizontalSpacing(px(10))
+        layout.setVerticalSpacing(px(2))
+
         # Signals
-        reset.clicked.connect(lambda: arg.write(arg["default"]))
+        reset.pressed.connect(lambda: arg.write(arg["default"]))
+
+        # Prevent button from getting stuck in down-state, since
+        # it is hidden right after having been pressed
+        reset.pressed.connect(lambda: reset.setDown(False))
+
         arg.changed.connect(lambda: self.on_changed(arg))
+
+        # Take ownership for clean deletion alongside parser
+        arg.setParent(self)
 
         self._row += 1
         self._arguments[arg["name"]] = arg
         self._resets[arg["name"]] = reset
+
+        # Establish initial state, taking "initial" value into account
+        self.on_changed(arg)
 
     def clear(self):
         assert self._storage, "Cannot clear without persistent storage"
@@ -309,12 +402,10 @@ class QArgumentParser(QtWidgets.QWidget):
         return self._arguments[name]
 
     def on_changed(self, arg):
-        is_edited = arg.read() != arg["default"]
-
         reset = self._resets[arg["name"]]
-        reset.setVisible(is_edited)
+        reset.setVisible(arg.isEdited())
 
-        arg["edited"] = is_edited
+        arg["edited"] = arg.isEdited()
         self.changed.emit(arg)
 
     # Optional PEP08 syntax
@@ -322,28 +413,41 @@ class QArgumentParser(QtWidgets.QWidget):
 
 
 class QArgument(QtCore.QObject):
-    """Base class of argument user interface
-    """
+    """Base class of argument user interface"""
+
     changed = QtCore.Signal()
 
     # Provide a left-hand side label for this argument
     label = True
+
     # For defining default value for each argument type
     default = None
 
     def __init__(self, name, default=None, **kwargs):
         super(QArgument, self).__init__(kwargs.pop("parent", None))
 
-        kwargs["name"] = name
-        kwargs["label"] = kwargs.get("label", camel_to_title(name))
-        kwargs["default"] = self.default if default is None else default
-        kwargs["help"] = kwargs.get("help", "")
-        kwargs["read"] = kwargs.get("read")
-        kwargs["write"] = kwargs.get("write")
-        kwargs["enabled"] = bool(kwargs.get("enabled", True))
-        kwargs["edited"] = False
+        args = {}
+        args["name"] = name
+        args["label"] = kwargs.pop("label", camel_to_title(name))
+        args["default"] = self.default if default is None else default
+        args["initial"] = kwargs.pop("initial", None)
+        args["help"] = kwargs.pop("help", "")
+        args["read"] = kwargs.pop("read", None)
+        args["write"] = kwargs.pop("write", None)
+        args["items"] = kwargs.pop("items", [])
+        args["min"] = kwargs.pop("min", 0)
+        args["max"] = kwargs.pop("max", 99)
+        args["enabled"] = bool(kwargs.pop("enabled", True))
+        args["edited"] = False
 
-        self._data = kwargs
+        # Anything left is an error
+        for arg in kwargs:
+            raise TypeError(
+                "%s() got an unexpected keyword argument '%s' #"
+                % (type(self).__name__, arg)
+            )
+
+        self._data = args
 
     def __str__(self):
         return self["name"]
@@ -364,6 +468,9 @@ class QArgument(QtCore.QObject):
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def isEdited(self):
+        return self.read() != self["default"]
 
     def create(self):
         return QtWidgets.QWidget()
@@ -391,7 +498,7 @@ class Boolean(QArgument):
     """
 
     def create(self):
-        widget = QtWidgets.QCheckBox()
+        widget = QtWidgets.QCheckBox(self._data["label"])
 
         if isinstance(self, Tristate):
             self._read = lambda: widget.checkState()
@@ -424,8 +531,13 @@ class Boolean(QArgument):
         self._write = lambda value: widget.setCheckState(state[value])
         widget.clicked.connect(self.changed.emit)
 
-        if self["default"] is not None:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -437,28 +549,109 @@ class Tristate(QArgument):
     """Not implemented"""
 
 
+class FractionSlider(QtWidgets.QSlider):
+    """Slider capable of sliding between whole numbers
+
+    Qt, surprisingly, doesn't provide this out of the box
+
+    """
+
+    _floatValueChanged = QtCore.Signal(float)
+
+    def __init__(self, steps=100, parent=None):
+        super(FractionSlider, self).__init__(parent=parent)
+
+        self.steps = steps
+
+        self.valueChanged.connect(self._onValueChanged)
+
+        # Masquerade as native signal, now that we're connected
+        # to and will translate that into a float value
+        self.valueChanged = self._floatValueChanged
+
+    def _onValueChanged(self, value):
+        self._floatValueChanged.emit(value / float(self.steps))
+
+    def setMinimum(self, value):
+        super(FractionSlider, self).setMinimum(value * self.steps)
+
+    def setMaximum(self, value):
+        super(FractionSlider, self).setMaximum(value * self.steps)
+
+    def setValue(self, value):
+        super(FractionSlider, self).setValue(value * self.steps)
+
+    def value(self):
+        return super(FractionSlider, self).value() / float(self.steps)
+
+
 class Number(QArgument):
     """Base class of numeric type user interface"""
     default = 0
 
     def create(self):
         if isinstance(self, Float):
+            slider = FractionSlider()
             widget = QtWidgets.QDoubleSpinBox()
             widget.setMinimum(self._data.get("min", 0.0))
             widget.setMaximum(self._data.get("max", 99.99))
+
+            # Account for small values
+            delta = widget.maximum() - widget.minimum()
+
+            if delta < 10:
+                stepsize = 0.1
+
+            widget.setSingleStep(stepsize)
+
         else:
+            slider = QtWidgets.QSlider()
             widget = QtWidgets.QSpinBox()
             widget.setMinimum(self._data.get("min", 0))
             widget.setMaximum(self._data.get("max", 99))
 
+        widget.setMinimumWidth(px(50))
+
+        container = QtWidgets.QWidget()
+        slider.setMaximum(widget.maximum())
+        slider.setMinimum(widget.minimum())
+        slider.setOrientation(QtCore.Qt.Horizontal)
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.addWidget(slider)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._slider = slider
+        self._widget = widget
+
+        # Synchonise spinbox with slider
         widget.editingFinished.connect(self.changed.emit)
+        widget.valueChanged.connect(self.on_spinbox_changed)
+        slider.valueChanged.connect(self.on_slider_changed)
+
         self._read = lambda: widget.value()
         self._write = lambda value: widget.setValue(value)
 
-        if self["default"] != self.default:
-            self._write(self["default"])
+        initial = self["initial"]
 
-        return widget
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return container
+
+    def on_spinbox_changed(self, value):
+        self._slider.setValue(value)
+        # Spinbox emits a signal all on its own
+
+    def on_slider_changed(self, value):
+        self._widget.setValue(value)
+
+        # Help spinbox emit this change
+        self.changed.emit()
 
 
 class Integer(Number):
@@ -506,8 +699,8 @@ class Range(Number):
 class Double3(QArgument):
     """Double3 type user interface
 
-    Presented by three `QtWidgets.QLineEdit` widget with `QDoubleValidator`
-    installed.
+    Presented by three `QtWidgets.QLineEdit` widget
+    with `QDoubleValidator` installed.
 
     Arguments:
         name (str): The name of argument
@@ -517,6 +710,7 @@ class Double3(QArgument):
         enabled (bool, optional): Whether to enable this widget, default True
 
     """
+
     default = (0, 0, 0)
 
     def create(self):
@@ -530,8 +724,13 @@ class Double3(QArgument):
         self._write = lambda value: [
             w.setText(str(float(v))) for w, v in zip([x, y, z], value)]
 
-        if self["default"] != self.default:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
 
         return widget
 
@@ -586,9 +785,14 @@ class String(QArgument):
             widget.setReadOnly(True)
         widget.setPlaceholderText(self._data.get("placeholder", ""))
 
-        if self["default"] is not None:
-            self._write(self["default"])
-            self._previous = self["default"]
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
+            self._previous = initial
 
         return widget
 
@@ -657,8 +861,13 @@ class Button(QArgument):
             self._read = lambda: "clicked"
             self._write = lambda value: None
 
-        if self["default"] is not None:
-            self._write(self["default"])
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -701,6 +910,14 @@ class InfoList(QArgument):
 
         self._read = lambda: model.stringList()
         self._write = lambda value: model.setStringList(value)
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
 
         return widget
 
@@ -821,8 +1038,8 @@ class Enum(QArgument):
     """
 
     def __init__(self, name, **kwargs):
-        kwargs["default"] = kwargs.pop("default", None)
-        kwargs["items"] = kwargs.get("items", [])
+        kwargs["items"] = kwargs.get("items", ["Default"])
+        kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
 
         _enum_types = (tuple, list, types.GeneratorType)
         assert isinstance(kwargs["items"], _enum_types), (
@@ -831,7 +1048,7 @@ class Enum(QArgument):
 
         super(Enum, self).__init__(name, **kwargs)
 
-    def create(self):
+    def create(self, fillWidth=True):
         items = list(self["items"])
 
         widget = QtWidgets.QComboBox()
@@ -839,22 +1056,69 @@ class Enum(QArgument):
         widget.currentIndexChanged.connect(
             lambda index: self.changed.emit())
 
-        self._read = lambda: widget.currentText()
-        self._write = lambda value: widget.setCurrentText(value)
+        # Comboboxes aren't allowed to stretch without
+        # the choices also being stretched
+        container = QtWidgets.QWidget()
 
-        if self["default"] is not None and len(items):
-            if isinstance(self["default"], int):
-                index = self["default"]
+        if not fillWidth:
+            layout = QtWidgets.QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+
+            # Shrink to smallest horizontal size
+            widget.setSizePolicy(QtWidgets.QSizePolicy.Fixed,
+                                 QtWidgets.QSizePolicy.Fixed)
+            layout.addWidget(widget, 1, QtCore.Qt.AlignLeft)
+
+        self._read = lambda: widget.currentText()
+
+        def _write(value):
+            index = None
+
+            # Support passing an index directly
+            if isinstance(value, int):
+                index = value
+
+            else:
+                for idx, val in enumerate(items):
+                    if value == val:
+                        index = idx
+                        break
+
+            assert index is not None, (
+                "%r isn't an option for '%s'" % (value, self["name"])
+            )
+
+            widget.setCurrentIndex(index)
+
+        self._write = _write
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None and len(items):
+            if isinstance(initial, int):
+                index = initial
                 index = 0 if index > len(items) else index
-                self["default"] = items[index]
+                initial = items[index]
             else:
                 # Must be str type. If the default str is not in list, will
                 # fallback to the first item silently.
                 pass
 
-            self._write(self["default"])
+            self._write(initial)
 
-        return widget
+        return widget if fillWidth else container
+
+    def isEdited(self):
+        default = self["default"]
+
+        # Account for integer defaults
+        if isinstance(default, int):
+            default = self["items"][self["default"]]
+
+        return self.read() != default
 
 
 def camelToTitle(text):
@@ -895,7 +1159,7 @@ def _demo():
     parser.add_argument("age", default=33, help="Your age")
     parser.add_argument("height", default=1.87, help="Your height")
     parser.add_argument("alive", default=True, help="Your state")
-    parser.add_argument("class", type=Enum, items=[  # (TODO) Reset not hidden
+    parser.add_argument("class", type=Enum, items=[
         "Ranger",
         "Warrior",
         "Sorcerer",

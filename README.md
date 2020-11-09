@@ -33,10 +33,17 @@ app.exec_()
 - [x] Automatic label from name
 - [x] Dual PEP8 and Qt syntax
 - [ ] Theme support
+- [x] HDPI support
 - [x] Min/max values for sliders
 - [ ] Wrap any instance of `argparse.ArgumentParser` with a GUI
 - [ ] Argument Icons, for extra flare
 - [ ] Argument Groups, e.g. tree view or side-panel
+
+An example of use from within Maya.
+
+<img width=600 src=https://user-images.githubusercontent.com/2152766/98442256-8a0e3880-20fb-11eb-8f1a-4524f297f324.gif>
+
+- See [examples.py](https://github.com/mottosso/qargparse.py/blob/master/examples.py)
 
 <br>
 
@@ -70,14 +77,12 @@ In addition to being able to subclass and create your own widgets, these are the
 
 ### Install
 
-qargparse.py is available on PyPI.
+Download or copy/paste [qargparse.py](https://github.com/mottosso/qargparse.py/archive/master.zip) into your project, there are no dependencies.
 
 ```bash
-$ pip install qargparse.py
+# Test it from a command-line like this
 $ python -m qargparse --demo
 ```
-
-> This also installs [Qt.py](https://github.com/mottosso/Qt.py) as a dependency. Skip this by passing `--no-deps` to `pip install`, note however that Qt.py is required in order for `qargparse.py` to run.
 
 <br>
 
@@ -125,6 +130,25 @@ parser.add_argument("age", default=54)  # `int` inferred
 
 <br>
 
+### Default and Initial Values
+
+There are two seemingly similar values per argument.
+
+```py
+Boolean("alive", default=True, initial=False)
+```
+
+What does this mean?
+
+1. `False` is the initial value displayed in the UI
+2. `True` is the value returned to when the value is *reset*
+
+This way, you can store the current state of values elsewhere, such as on disk, and launch the UI with those values set, whilst still allowing the user to spot which values differs from their default values.
+
+"Initial" is the value you would typically store on disk, keeping defaults as immutable somewhere in your application code.
+
+<br>
+
 ### Types
 
 In addition to standard types, QArgparse also supports user interface types.
@@ -145,6 +169,21 @@ import qargparse
 qargparse.addArgument()
 qargparse.add_argument()
 ```
+
+<br>
+
+### Style
+
+Customise the user experience, with `qargparse.DefaultStyle`.
+
+```py
+style = qargparse.DefaultStyle.copy()
+style["comboboxFillWidth"] = True
+parser = qargparse.QArgumentParser(style=style)
+parser.show()
+```
+
+![](https://user-images.githubusercontent.com/2152766/98440756-78746300-20f2-11eb-9ff9-4475c86ac461.png)
 
 <br>
 
