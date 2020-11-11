@@ -12,7 +12,7 @@ DefaultStyle = {
 }
 
 
-__version__ = "0.5.7"
+__version__ = "0.5.8"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 _dpi = None
