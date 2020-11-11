@@ -1086,9 +1086,18 @@ class Enum(QArgument):
                         index = idx
                         break
 
-            assert index is not None, (
-                "%r isn't an option for '%s'" % (value, self["name"])
-            )
+            # Be forgiving, as it isn't easy handling an
+            # error happening at this level
+            if index is None:
+                _log.debug(
+                    "%r isn't an option for '%s', whose options are '%s'" % (
+
+                        # Help the caller understand why this is happening
+                        value, self["name"], "', '".join(self["items"])
+                    )
+                )
+
+                index = 0
 
             widget.setCurrentIndex(index)
 
