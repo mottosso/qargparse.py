@@ -802,8 +802,8 @@ class String(QArgument):
         current = self._read()
 
         if current != self._previous:
-            self.changed.emit()
             self._previous = current
+            self.changed.emit()
 
 
 class Info(String):
