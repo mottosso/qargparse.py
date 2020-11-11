@@ -12,7 +12,7 @@ DefaultStyle = {
 }
 
 
-__version__ = "0.5.7"
+__version__ = "0.5.8"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 _dpi = None
@@ -341,7 +341,7 @@ class QArgumentParser(QtWidgets.QWidget):
         reset_container = QtWidgets.QWidget()
         reset_container.setProperty("type", "QArgparse:reset")
         reset = QtWidgets.QPushButton("")  # default
-        reset.setToolTip("Reset to %s" % arg["default"])
+        reset.setToolTip(arg.compose_reset_tip())
         reset.hide()  # shown on edit
 
         # Align label on top of row if widget is over two times higher
@@ -482,6 +482,11 @@ class QArgument(QtCore.QObject):
         self._write(value)
         self.changed.emit()
 
+    def compose_reset_tip(self):
+        return "Reset%s" % (
+            "" if self["default"] is None else " to %s" % str(self["default"])
+        )
+
 
 class Boolean(QArgument):
     """Boolean type user interface
@@ -599,9 +604,7 @@ class Number(QArgument):
             # Account for small values
             delta = widget.maximum() - widget.minimum()
 
-            if delta < 10:
-                stepsize = 0.1
-
+            stepsize = 0.1 if delta < 10 else 1.0
             widget.setSingleStep(stepsize)
 
         else:
@@ -777,7 +780,6 @@ class String(QArgument):
     def create(self):
         widget = QtWidgets.QLineEdit()
         widget.editingFinished.connect(self.onEditingFinished)
-        widget.returnPressed.connect(widget.editingFinished.emit)
         self._read = lambda: widget.text()
         self._write = lambda value: widget.setText(value)
 
@@ -800,8 +802,8 @@ class String(QArgument):
         current = self._read()
 
         if current != self._previous:
-            self.changed.emit()
             self._previous = current
+            self.changed.emit()
 
 
 class Info(String):
@@ -1039,7 +1041,7 @@ class Enum(QArgument):
 
     def __init__(self, name, **kwargs):
         kwargs["items"] = kwargs.get("items", ["Default"])
-        kwargs["default"] = kwargs.pop("default", kwargs["items"][0])
+        kwargs["default"] = kwargs.pop("default", 0)
 
         _enum_types = (tuple, list, types.GeneratorType)
         assert isinstance(kwargs["items"], _enum_types), (
@@ -1049,7 +1051,7 @@ class Enum(QArgument):
         super(Enum, self).__init__(name, **kwargs)
 
     def create(self, fillWidth=True):
-        items = list(self["items"])
+        items = self["items"] = list(self["items"])  # eval generator
 
         widget = QtWidgets.QComboBox()
         widget.addItems(items)
@@ -1119,6 +1121,9 @@ class Enum(QArgument):
             default = self["items"][self["default"]]
 
         return self.read() != default
+
+    def compose_reset_tip(self):
+        return "Reset to %s" % self["items"][self["default"]]
 
 
 def camelToTitle(text):
