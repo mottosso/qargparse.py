@@ -77,7 +77,7 @@ In addition to being able to subclass and create your own widgets, these are the
 
 ### Install
 
-Download or copy/paste [qargparse.py](https://github.com/mottosso/qargparse.py/archive/master.zip) into your project, there are no dependencies.
+Download or copy/paste [qargparse.py](https://github.com/mottosso/qargparse.py/archive/master.zip) into your project, there are no dependencies other than PyQt5 or PySide2.
 
 ```bash
 # Test it from a command-line like this
