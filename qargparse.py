@@ -12,7 +12,7 @@ DefaultStyle = {
 }
 
 
-__version__ = "0.5.8"
+__version__ = "0.5.9"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 _dpi = None
@@ -1132,7 +1132,10 @@ class Enum(QArgument):
         return self.read() != default
 
     def compose_reset_tip(self):
-        return "Reset to %s" % self["items"][self["default"]]
+        default = self["default"]
+        if isinstance(default, int):
+            default = self["items"][default]
+        return "Reset to %s" % default
 
 
 def camelToTitle(text):
