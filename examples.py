@@ -72,11 +72,15 @@ class BindSkinOptions(QtWidgets.QMainWindow):
             qargparse.Float("falloff", min=0.0, max=1.0, default=0.2),
             qargparse.Enum("resolution", items=["1024", "512", "256"],
                            default="256"),
-            qargparse.Boolean("validateVoxelState", default=True),
+            qargparse.Boolean("validateVoxelState", default=True, help=(
+                "A more lengthy description of what this option does"
+            )),
         ]
 
         parser = qargparse.QArgumentParser(args)
         parser.changed.connect(self.on_changed)
+        parser.entered.connect(self.on_entered)
+        parser.exited.connect(self.on_exited)
 
         layout = QtWidgets.QVBoxLayout(central)
         layout.addWidget(parser)
@@ -91,6 +95,12 @@ class BindSkinOptions(QtWidgets.QMainWindow):
 
     def on_changed(self, arg):
         print("%s changed to %s" % (arg["name"], arg.read()))
+
+    def on_entered(self, arg):
+        print("%s entered" % (arg["name"]))
+
+    def on_exited(self, arg):
+        print("%s exited" % (arg["name"]))
 
 
 if __name__ == '__main__':

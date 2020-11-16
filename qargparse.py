@@ -9,10 +9,13 @@ DefaultStyle = {
 
     # Should comboboxes cover the full horizontal width?
     "comboboxFillWidth": False,
+
+    # Should the QArgument(help=) be used as a tooltip?
+    "useTooltip": True,
 }
 
 
-__version__ = "0.5.9"
+__version__ = "0.5.10"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 _dpi = None
@@ -129,6 +132,7 @@ def px(value):
         any_widget.setWindowFlags(QtCore.Qt.ToolTip)
         any_widget.show()
         window = any_widget.windowHandle()
+        any_widget.deleteLater()
 
         # E.g. 1.5 or 2.0
         scale = window.screen().logicalDotsPerInch() / 96.0
@@ -175,6 +179,8 @@ class QArgumentParser(QtWidgets.QWidget):
     """
 
     changed = QtCore.Signal(QtCore.QObject)  # A QArgument
+    entered = QtCore.Signal(QtCore.QObject)
+    exited = QtCore.Signal(QtCore.QObject)
 
     def __init__(self,
                  arguments=None,
@@ -331,11 +337,13 @@ class QArgumentParser(QtWidgets.QWidget):
             widget = arg.create()
 
         for widget in (label, widget):
-            widget.setToolTip(arg["help"])
             widget.setObjectName(arg["name"])  # useful in CSS
             widget.setProperty("type", type(arg).__name__)
             widget.setAttribute(QtCore.Qt.WA_StyledBackground)
             widget.setEnabled(arg["enabled"])
+
+            if self._style.get("useTooltip"):
+                widget.setToolTip(arg["help"])
 
         # Reset btn widget
         reset_container = QtWidgets.QWidget()
@@ -382,6 +390,8 @@ class QArgumentParser(QtWidgets.QWidget):
         reset.pressed.connect(lambda: reset.setDown(False))
 
         arg.changed.connect(lambda: self.on_changed(arg))
+        arg.entered.connect(lambda: self.on_entered(arg))
+        arg.exited.connect(lambda: self.on_exited(arg))
 
         # Take ownership for clean deletion alongside parser
         arg.setParent(self)
@@ -408,6 +418,14 @@ class QArgumentParser(QtWidgets.QWidget):
         arg["edited"] = arg.isEdited()
         self.changed.emit(arg)
 
+    def on_entered(self, arg):
+        """Emitted when an argument is entered"""
+        self.entered.emit(arg)
+
+    def on_exited(self, arg):
+        """Emitted when an argument is exited"""
+        self.exited.emit(arg)
+
     # Optional PEP08 syntax
     add_argument = addArgument
 
@@ -416,6 +434,8 @@ class QArgument(QtCore.QObject):
     """Base class of argument user interface"""
 
     changed = QtCore.Signal()
+    entered = QtCore.Signal()
+    exited = QtCore.Signal()
 
     # Provide a left-hand side label for this argument
     label = True
@@ -488,6 +508,20 @@ class QArgument(QtCore.QObject):
         )
 
 
+def _with_entered_exited(cls, obj):
+    """Factory function to append `enterEvent` and `leaveEvent`"""
+    class WidgetHoverFactory(cls):
+        def enterEvent(self, event):
+            obj.entered.emit()
+            return super(WidgetHoverFactory, self).enterEvent(event)
+
+        def leaveEvent(self, event):
+            obj.exited.emit()
+            return super(WidgetHoverFactory, self).leaveEvent(event)
+
+    return WidgetHoverFactory
+
+
 class Boolean(QArgument):
     """Boolean type user interface
 
@@ -503,7 +537,8 @@ class Boolean(QArgument):
     """
 
     def create(self):
-        widget = QtWidgets.QCheckBox(self._data["label"])
+        Widget = _with_entered_exited(QtWidgets.QCheckBox, self)
+        widget = Widget(self._data["label"])
 
         if isinstance(self, Tristate):
             self._read = lambda: widget.checkState()
@@ -562,6 +597,8 @@ class FractionSlider(QtWidgets.QSlider):
     """
 
     _floatValueChanged = QtCore.Signal(float)
+    entered = QtCore.Signal()
+    exited = QtCore.Signal()
 
     def __init__(self, steps=100, parent=None):
         super(FractionSlider, self).__init__(parent=parent)
@@ -596,8 +633,8 @@ class Number(QArgument):
 
     def create(self):
         if isinstance(self, Float):
-            slider = FractionSlider()
-            widget = QtWidgets.QDoubleSpinBox()
+            slider = _with_entered_exited(FractionSlider, self)()
+            widget = _with_entered_exited(QtWidgets.QDoubleSpinBox, self)()
             widget.setMinimum(self._data.get("min", 0.0))
             widget.setMaximum(self._data.get("max", 99.99))
 
@@ -608,8 +645,8 @@ class Number(QArgument):
             widget.setSingleStep(stepsize)
 
         else:
-            slider = QtWidgets.QSlider()
-            widget = QtWidgets.QSpinBox()
+            slider = _with_entered_exited(QtWidgets.QSlider, self)()
+            widget = _with_entered_exited(QtWidgets.QSpinBox, self)()
             widget.setMinimum(self._data.get("min", 0))
             widget.setMaximum(self._data.get("max", 99))
 
@@ -738,7 +775,7 @@ class Double3(QArgument):
         return widget
 
     def child_arg(self, layout, index):
-        widget = QtWidgets.QLineEdit()
+        widget = _with_entered_exited(QtWidgets.QLineEdit, self)()
         widget.setValidator(QtGui.QDoubleValidator())
 
         default = str(float(self["default"][index]))
@@ -778,7 +815,7 @@ class String(QArgument):
         self._previous = None
 
     def create(self):
-        widget = QtWidgets.QLineEdit()
+        widget = _with_entered_exited(QtWidgets.QLineEdit, self)()
         widget.editingFinished.connect(self.onEditingFinished)
         self._read = lambda: widget.text()
         self._write = lambda value: widget.setText(value)
@@ -845,7 +882,8 @@ class Button(QArgument):
     label = False
 
     def create(self):
-        widget = QtWidgets.QPushButton(self["label"])
+        Widget = _with_entered_exited(QtWidgets.QPushButton, self)
+        widget = Widget(self["label"])
         widget.clicked.connect(self.changed.emit)
 
         state = [
@@ -906,7 +944,7 @@ class InfoList(QArgument):
                 return super(Model, self).data(index, role)
 
         model = QtCore.QStringListModel(self["default"])
-        widget = QtWidgets.QListView()
+        widget = _with_entered_exited(QtWidgets.QListView, self)()
         widget.setModel(model)
         widget.setEditTriggers(widget.NoEditTriggers)
 
@@ -985,7 +1023,7 @@ class Choice(QArgument):
             set_current(default or items[0])
 
         model = QtCore.QStringListModel()
-        widget = QtWidgets.QListView()
+        widget = _with_entered_exited(QtWidgets.QListView, self)()
         widget.setModel(model)
         widget.setEditTriggers(widget.NoEditTriggers)
         widget.setSelectionMode(widget.SingleSelection)
@@ -1015,7 +1053,7 @@ class Separator(QArgument):
     """
 
     def create(self):
-        widget = QtWidgets.QWidget()
+        widget = _with_entered_exited(QtWidgets.QWidget, self)()
 
         self._read = lambda: None
         self._write = lambda value: None
@@ -1053,7 +1091,7 @@ class Enum(QArgument):
     def create(self, fillWidth=True):
         items = self["items"] = list(self["items"])  # eval generator
 
-        widget = QtWidgets.QComboBox()
+        widget = _with_entered_exited(QtWidgets.QComboBox, self)()
         widget.addItems(items)
         widget.currentIndexChanged.connect(
             lambda index: self.changed.emit())
