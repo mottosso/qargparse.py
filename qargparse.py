@@ -214,6 +214,7 @@ class QArgumentParser(QtWidgets.QWidget):
 
         icon = QtWidgets.QLabel()
         description = QtWidgets.QLabel(description or "")
+        description.setWordWrap(True)
         layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
         layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
 
@@ -331,6 +332,9 @@ class QArgumentParser(QtWidgets.QWidget):
         # Argument label and editor widget
         label = QtWidgets.QLabel(arg["label"])
 
+        # Take condition into account
+        arg["enabled"] = arg["condition"]()
+
         if isinstance(arg, Enum):
             widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
         else:
@@ -351,6 +355,10 @@ class QArgumentParser(QtWidgets.QWidget):
         reset = QtWidgets.QPushButton("")  # default
         reset.setToolTip(arg.compose_reset_tip())
         reset.hide()  # shown on edit
+
+        # Internal
+        arg["_widget"] = widget
+        arg["_reset"] = reset
 
         # Align label on top of row if widget is over two times higher
         height = (lambda w: w.sizeHint().height())
@@ -416,6 +424,18 @@ class QArgumentParser(QtWidgets.QWidget):
         reset.setVisible(arg.isEdited())
 
         arg["edited"] = arg.isEdited()
+
+        if arg["edited"]:
+            arg["_widget"].setStyleSheet("font-weight: bold")
+        else:
+            arg["_widget"].setStyleSheet(None)
+
+        # Conditions may have changed
+        for other in self._arguments.values():
+            other["enabled"] = other["condition"]()
+            other["_widget"].setEnabled(other["enabled"])
+            other["_reset"].setEnabled(other["enabled"])
+
         self.changed.emit(arg)
 
     def on_entered(self, arg):
@@ -459,6 +479,7 @@ class QArgument(QtCore.QObject):
         args["max"] = kwargs.pop("max", 99)
         args["enabled"] = bool(kwargs.pop("enabled", True))
         args["edited"] = False
+        args["condition"] = lambda: True
 
         # Anything left is an error
         for arg in kwargs:
@@ -501,6 +522,9 @@ class QArgument(QtCore.QObject):
     def write(self, value):
         self._write(value)
         self.changed.emit()
+
+    def reset(self):
+        self.write(self["default"])
 
     def compose_reset_tip(self):
         return "Reset%s" % (
@@ -1059,6 +1083,10 @@ class Separator(QArgument):
         self._write = lambda value: None
 
         return widget
+
+    def reset(self):
+        # This ain't got no default value
+        pass
 
 
 class Enum(QArgument):
