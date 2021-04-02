@@ -37,7 +37,8 @@ try:
         QtGui,
     )
 
-    from shiboken2 import wrapInstance, getCppPointer
+    from shiboken2 import wrapInstance, getCppPointer, isValid
+    QtCompat.isValid = isValid
     QtCompat.wrapInstance = wrapInstance
     QtCompat.getCppPointer = getCppPointer
 
@@ -61,7 +62,8 @@ except ImportError:
         QtCore.Slot = QtCore.pyqtSlot
         QtCore.Property = QtCore.pyqtProperty
 
-        from sip import wrapinstance, unwrapinstance
+        from sip import wrapinstance, unwrapinstance, isdeleted
+        QtCompat.isValid = lambda w: not isdeleted(w)
         QtCompat.wrapInstance = wrapinstance
         QtCompat.getCppPointer = unwrapinstance
 
@@ -182,6 +184,10 @@ class QArgumentParser(QtWidgets.QWidget):
     entered = QtCore.Signal(QtCore.QObject)
     exited = QtCore.Signal(QtCore.QObject)
 
+    help_wanted = QtCore.Signal()
+    help_entered = QtCore.Signal()
+    help_exited = QtCore.Signal()
+
     def __init__(self,
                  arguments=None,
                  description=None,
@@ -210,12 +216,14 @@ class QArgumentParser(QtWidgets.QWidget):
         )
 
         layout = QtWidgets.QGridLayout(self)
-        layout.setRowStretch(999, 1)
+        layout.setRowStretch(9999, 1)  # Push all options up
+        layout.setColumnStretch(1, 1)
 
-        icon = QtWidgets.QLabel()
-        description = QtWidgets.QLabel(description or "")
+        Label = _with_entered_exited2(QtWidgets.QLabel)
+        icon = Label()
+        description = Label(description or "")
         description.setWordWrap(True)
-        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
+        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignRight)
         layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
 
         # Shown when set
@@ -224,7 +232,14 @@ class QArgumentParser(QtWidgets.QWidget):
 
         # For CSS
         icon.setObjectName("icon")
+        icon.entered.connect(self.help_entered.emit)
+        icon.exited.connect(self.help_exited.emit)
+        icon.setCursor(QtCore.Qt.PointingHandCursor)
+
         description.setObjectName("description")
+        description.entered.connect(self.help_entered.emit)
+        description.exited.connect(self.help_exited.emit)
+        description.setCursor(QtCore.Qt.PointingHandCursor)
 
         self._row = 1
         self._storage = storage
@@ -242,6 +257,14 @@ class QArgumentParser(QtWidgets.QWidget):
                            QtWidgets.QSizePolicy.MinimumExpanding)
 
         self.setStyleSheet(_scaled_stylesheet())
+
+    def mouseReleaseEvent(self, event):
+        widget = self.childAt(event.pos())
+
+        if widget and widget.objectName() in ("icon", "description"):
+            self.help_wanted.emit()
+
+        super(QArgumentParser, self).mouseReleaseEvent(event)
 
     def __iter__(self):
         """Make parser iterable
@@ -330,7 +353,7 @@ class QArgumentParser(QtWidgets.QWidget):
                 arg["default"] = default
 
         # Argument label and editor widget
-        label = QtWidgets.QLabel(arg["label"])
+        label = _with_entered_exited2(QtWidgets.QLabel)(arg["label"])
 
         # Take condition into account
         arg["enabled"] = arg["condition"]()
@@ -384,7 +407,6 @@ class QArgumentParser(QtWidgets.QWidget):
 
         layout.addWidget(widget, self._row, 1)
         layout.addWidget(reset_container, self._row, 2, *alignment)
-        layout.setColumnStretch(1, 1)
 
         # Packed tightly on the vertical
         layout.setHorizontalSpacing(px(10))
@@ -400,6 +422,8 @@ class QArgumentParser(QtWidgets.QWidget):
         arg.changed.connect(lambda: self.on_changed(arg))
         arg.entered.connect(lambda: self.on_entered(arg))
         arg.exited.connect(lambda: self.on_exited(arg))
+        label.entered.connect(lambda: self.on_entered(arg))
+        label.exited.connect(lambda: self.on_exited(arg))
 
         # Take ownership for clean deletion alongside parser
         arg.setParent(self)
@@ -526,6 +550,16 @@ class QArgument(QtCore.QObject):
     def reset(self):
         self.write(self["default"])
 
+    def widget(self):
+        widget = self._data["_widget"]
+
+        # Let the bells chime
+        assert QtCompat.isValid(widget), (
+            "%s was no longer alive" % self["name"]
+        )
+
+        return widget
+
     def compose_reset_tip(self):
         return "Reset%s" % (
             "" if self["default"] is None else " to %s" % str(self["default"])
@@ -535,12 +569,34 @@ class QArgument(QtCore.QObject):
 def _with_entered_exited(cls, obj):
     """Factory function to append `enterEvent` and `leaveEvent`"""
     class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
         def enterEvent(self, event):
+            self.entered.emit()
             obj.entered.emit()
             return super(WidgetHoverFactory, self).enterEvent(event)
 
         def leaveEvent(self, event):
+            self.exited.emit()
             obj.exited.emit()
+            return super(WidgetHoverFactory, self).leaveEvent(event)
+
+    return WidgetHoverFactory
+
+
+def _with_entered_exited2(cls):
+    """Factory function to append `enterEvent` and `leaveEvent`"""
+    class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
+        def enterEvent(self, event):
+            self.entered.emit()
+            return super(WidgetHoverFactory, self).enterEvent(event)
+
+        def leaveEvent(self, event):
+            self.exited.emit()
             return super(WidgetHoverFactory, self).leaveEvent(event)
 
     return WidgetHoverFactory
