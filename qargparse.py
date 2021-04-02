@@ -356,7 +356,8 @@ class QArgumentParser(QtWidgets.QWidget):
         label = _with_entered_exited2(QtWidgets.QLabel)(arg["label"])
 
         # Take condition into account
-        arg["enabled"] = arg["condition"]()
+        if arg["condition"]:
+            arg["enabled"] = arg["condition"]()
 
         if isinstance(arg, Enum):
             widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
@@ -456,9 +457,10 @@ class QArgumentParser(QtWidgets.QWidget):
 
         # Conditions may have changed
         for other in self._arguments.values():
-            other["enabled"] = other["condition"]()
-            other["_widget"].setEnabled(other["enabled"])
-            other["_reset"].setEnabled(other["enabled"])
+            if other["condition"]:
+                other["enabled"] = other["condition"]()
+                other["_widget"].setEnabled(other["enabled"])
+                other["_reset"].setEnabled(other["enabled"])
 
         self.changed.emit(arg)
 
@@ -503,7 +505,7 @@ class QArgument(QtCore.QObject):
         args["max"] = kwargs.pop("max", 99)
         args["enabled"] = bool(kwargs.pop("enabled", True))
         args["edited"] = False
-        args["condition"] = lambda: True
+        args["condition"] = None
 
         # Anything left is an error
         for arg in kwargs:
