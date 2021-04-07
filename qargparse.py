@@ -506,6 +506,7 @@ class QArgument(QtCore.QObject):
         args["enabled"] = bool(kwargs.pop("enabled", True))
         args["edited"] = False
         args["condition"] = None
+        args["placeholder"] = kwargs.pop("placeholder", None)
 
         # Anything left is an error
         for arg in kwargs:
@@ -896,6 +897,10 @@ class String(QArgument):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
 
+    def isEdited(self):
+        # There's no reasonable default value for a string
+        return False
+
     def create(self):
         widget = _with_entered_exited(QtWidgets.QLineEdit, self)()
         widget.editingFinished.connect(self.onEditingFinished)
@@ -904,7 +909,7 @@ class String(QArgument):
 
         if isinstance(self, Info):
             widget.setReadOnly(True)
-        widget.setPlaceholderText(self._data.get("placeholder", ""))
+        widget.setPlaceholderText(self._data.get("placeholder") or "")
 
         initial = self["initial"]
 
@@ -923,6 +928,98 @@ class String(QArgument):
         if current != self._previous:
             self._previous = current
             self.changed.emit()
+
+
+class String2(String):
+    """A pair of 2 strings"""
+
+    def create(self):
+        a = _with_entered_exited(QtWidgets.QLineEdit, self)()
+        b = _with_entered_exited(QtWidgets.QLineEdit, self)()
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(a)
+        layout.addWidget(b)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        a.editingFinished.connect(self.onEditingFinished)
+        b.editingFinished.connect(self.onEditingFinished)
+
+        self._read = lambda: (a.text(), b.text())
+        self._write = lambda value: (a.setText(value[0]), b.setText(value[1]))
+
+        if isinstance(self, Info):
+            a.setReadOnly(True)
+
+        placeholder = self._data.get("placeholder") or ("", "")
+        a.setPlaceholderText(placeholder[0])
+        b.setPlaceholderText(placeholder[1])
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
+            self._previous = initial
+
+        return container
+
+
+class Path(String):
+    """Path type user interface
+
+    Represented by `QtWidgets.QLineEdit` and `QPushButton`
+
+    Arguments:
+
+    """
+
+    browsed = QtCore.Signal()
+
+    def create(self):
+        # Keep the `onEditingFinished` signal
+        widget = super(Path, self).create()
+
+        browse = _with_entered_exited(QtWidgets.QPushButton, self)("Browse")
+
+        widget.setMinimumWidth(px(50))
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.addWidget(browse)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._slider = browse
+        self._widget = widget
+
+        # Synchonise spinbox with browse
+        # widget.editingFinished.connect(self.changed.emit)
+        browse.clicked.connect(self.browsed.emit)
+
+        self._read = lambda: widget.text()
+        self._write = lambda value: widget.setText(value)
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return container
+
+    def path(self):
+        return self._widget.text()
+
+    def setPath(self, path):
+        self._widget.setText(path)
 
 
 class Info(String):
