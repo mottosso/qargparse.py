@@ -37,7 +37,8 @@ try:
         QtGui,
     )
 
-    from shiboken2 import wrapInstance, getCppPointer
+    from shiboken2 import wrapInstance, getCppPointer, isValid
+    QtCompat.isValid = isValid
     QtCompat.wrapInstance = wrapInstance
     QtCompat.getCppPointer = getCppPointer
 
@@ -61,7 +62,8 @@ except ImportError:
         QtCore.Slot = QtCore.pyqtSlot
         QtCore.Property = QtCore.pyqtProperty
 
-        from sip import wrapinstance, unwrapinstance
+        from sip import wrapinstance, unwrapinstance, isdeleted
+        QtCompat.isValid = lambda w: not isdeleted(w)
         QtCompat.wrapInstance = wrapinstance
         QtCompat.getCppPointer = unwrapinstance
 
@@ -182,6 +184,10 @@ class QArgumentParser(QtWidgets.QWidget):
     entered = QtCore.Signal(QtCore.QObject)
     exited = QtCore.Signal(QtCore.QObject)
 
+    help_wanted = QtCore.Signal()
+    help_entered = QtCore.Signal()
+    help_exited = QtCore.Signal()
+
     def __init__(self,
                  arguments=None,
                  description=None,
@@ -210,11 +216,14 @@ class QArgumentParser(QtWidgets.QWidget):
         )
 
         layout = QtWidgets.QGridLayout(self)
-        layout.setRowStretch(999, 1)
+        layout.setRowStretch(9999, 1)  # Push all options up
+        layout.setColumnStretch(1, 1)
 
-        icon = QtWidgets.QLabel()
-        description = QtWidgets.QLabel(description or "")
-        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
+        Label = _with_entered_exited2(QtWidgets.QLabel)
+        icon = Label()
+        description = Label(description or "")
+        description.setWordWrap(True)
+        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignRight)
         layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
 
         # Shown when set
@@ -223,7 +232,14 @@ class QArgumentParser(QtWidgets.QWidget):
 
         # For CSS
         icon.setObjectName("icon")
+        icon.entered.connect(self.help_entered.emit)
+        icon.exited.connect(self.help_exited.emit)
+        icon.setCursor(QtCore.Qt.PointingHandCursor)
+
         description.setObjectName("description")
+        description.entered.connect(self.help_entered.emit)
+        description.exited.connect(self.help_exited.emit)
+        description.setCursor(QtCore.Qt.PointingHandCursor)
 
         self._row = 1
         self._storage = storage
@@ -241,6 +257,14 @@ class QArgumentParser(QtWidgets.QWidget):
                            QtWidgets.QSizePolicy.MinimumExpanding)
 
         self.setStyleSheet(_scaled_stylesheet())
+
+    def mouseReleaseEvent(self, event):
+        widget = self.childAt(event.pos())
+
+        if widget and widget.objectName() in ("icon", "description"):
+            self.help_wanted.emit()
+
+        super(QArgumentParser, self).mouseReleaseEvent(event)
 
     def __iter__(self):
         """Make parser iterable
@@ -329,7 +353,11 @@ class QArgumentParser(QtWidgets.QWidget):
                 arg["default"] = default
 
         # Argument label and editor widget
-        label = QtWidgets.QLabel(arg["label"])
+        label = _with_entered_exited2(QtWidgets.QLabel)(arg["label"])
+
+        # Take condition into account
+        if arg["condition"]:
+            arg["enabled"] = arg["condition"]()
 
         if isinstance(arg, Enum):
             widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
@@ -351,6 +379,10 @@ class QArgumentParser(QtWidgets.QWidget):
         reset = QtWidgets.QPushButton("")  # default
         reset.setToolTip(arg.compose_reset_tip())
         reset.hide()  # shown on edit
+
+        # Internal
+        arg["_widget"] = widget
+        arg["_reset"] = reset
 
         # Align label on top of row if widget is over two times higher
         height = (lambda w: w.sizeHint().height())
@@ -376,7 +408,6 @@ class QArgumentParser(QtWidgets.QWidget):
 
         layout.addWidget(widget, self._row, 1)
         layout.addWidget(reset_container, self._row, 2, *alignment)
-        layout.setColumnStretch(1, 1)
 
         # Packed tightly on the vertical
         layout.setHorizontalSpacing(px(10))
@@ -392,6 +423,8 @@ class QArgumentParser(QtWidgets.QWidget):
         arg.changed.connect(lambda: self.on_changed(arg))
         arg.entered.connect(lambda: self.on_entered(arg))
         arg.exited.connect(lambda: self.on_exited(arg))
+        label.entered.connect(lambda: self.on_entered(arg))
+        label.exited.connect(lambda: self.on_exited(arg))
 
         # Take ownership for clean deletion alongside parser
         arg.setParent(self)
@@ -416,6 +449,19 @@ class QArgumentParser(QtWidgets.QWidget):
         reset.setVisible(arg.isEdited())
 
         arg["edited"] = arg.isEdited()
+
+        if arg["edited"]:
+            arg["_widget"].setStyleSheet("font-weight: bold")
+        else:
+            arg["_widget"].setStyleSheet(None)
+
+        # Conditions may have changed
+        for other in self._arguments.values():
+            if other["condition"]:
+                other["enabled"] = other["condition"]()
+                other["_widget"].setEnabled(other["enabled"])
+                other["_reset"].setEnabled(other["enabled"])
+
         self.changed.emit(arg)
 
     def on_entered(self, arg):
@@ -459,6 +505,8 @@ class QArgument(QtCore.QObject):
         args["max"] = kwargs.pop("max", 99)
         args["enabled"] = bool(kwargs.pop("enabled", True))
         args["edited"] = False
+        args["condition"] = None
+        args["placeholder"] = kwargs.pop("placeholder", None)
 
         # Anything left is an error
         for arg in kwargs:
@@ -502,6 +550,19 @@ class QArgument(QtCore.QObject):
         self._write(value)
         self.changed.emit()
 
+    def reset(self):
+        self.write(self["default"])
+
+    def widget(self):
+        widget = self._data["_widget"]
+
+        # Let the bells chime
+        assert QtCompat.isValid(widget), (
+            "%s was no longer alive" % self["name"]
+        )
+
+        return widget
+
     def compose_reset_tip(self):
         return "Reset%s" % (
             "" if self["default"] is None else " to %s" % str(self["default"])
@@ -511,12 +572,34 @@ class QArgument(QtCore.QObject):
 def _with_entered_exited(cls, obj):
     """Factory function to append `enterEvent` and `leaveEvent`"""
     class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
         def enterEvent(self, event):
+            self.entered.emit()
             obj.entered.emit()
             return super(WidgetHoverFactory, self).enterEvent(event)
 
         def leaveEvent(self, event):
+            self.exited.emit()
             obj.exited.emit()
+            return super(WidgetHoverFactory, self).leaveEvent(event)
+
+    return WidgetHoverFactory
+
+
+def _with_entered_exited2(cls):
+    """Factory function to append `enterEvent` and `leaveEvent`"""
+    class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
+        def enterEvent(self, event):
+            self.entered.emit()
+            return super(WidgetHoverFactory, self).enterEvent(event)
+
+        def leaveEvent(self, event):
+            self.exited.emit()
             return super(WidgetHoverFactory, self).leaveEvent(event)
 
     return WidgetHoverFactory
@@ -814,6 +897,10 @@ class String(QArgument):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
 
+    def isEdited(self):
+        # There's no reasonable default value for a string
+        return False
+
     def create(self):
         widget = _with_entered_exited(QtWidgets.QLineEdit, self)()
         widget.editingFinished.connect(self.onEditingFinished)
@@ -822,7 +909,7 @@ class String(QArgument):
 
         if isinstance(self, Info):
             widget.setReadOnly(True)
-        widget.setPlaceholderText(self._data.get("placeholder", ""))
+        widget.setPlaceholderText(self._data.get("placeholder") or "")
 
         initial = self["initial"]
 
@@ -841,6 +928,98 @@ class String(QArgument):
         if current != self._previous:
             self._previous = current
             self.changed.emit()
+
+
+class String2(String):
+    """A pair of 2 strings"""
+
+    def create(self):
+        a = _with_entered_exited(QtWidgets.QLineEdit, self)()
+        b = _with_entered_exited(QtWidgets.QLineEdit, self)()
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(a)
+        layout.addWidget(b)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        a.editingFinished.connect(self.onEditingFinished)
+        b.editingFinished.connect(self.onEditingFinished)
+
+        self._read = lambda: (a.text(), b.text())
+        self._write = lambda value: (a.setText(value[0]), b.setText(value[1]))
+
+        if isinstance(self, Info):
+            a.setReadOnly(True)
+
+        placeholder = self._data.get("placeholder") or ("", "")
+        a.setPlaceholderText(placeholder[0])
+        b.setPlaceholderText(placeholder[1])
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
+            self._previous = initial
+
+        return container
+
+
+class Path(String):
+    """Path type user interface
+
+    Represented by `QtWidgets.QLineEdit` and `QPushButton`
+
+    Arguments:
+
+    """
+
+    browsed = QtCore.Signal()
+
+    def create(self):
+        # Keep the `onEditingFinished` signal
+        widget = super(Path, self).create()
+
+        browse = _with_entered_exited(QtWidgets.QPushButton, self)("Browse")
+
+        widget.setMinimumWidth(px(50))
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.addWidget(browse)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._slider = browse
+        self._widget = widget
+
+        # Synchonise spinbox with browse
+        # widget.editingFinished.connect(self.changed.emit)
+        browse.clicked.connect(self.browsed.emit)
+
+        self._read = lambda: widget.text()
+        self._write = lambda value: widget.setText(value)
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return container
+
+    def path(self):
+        return self._widget.text()
+
+    def setPath(self, path):
+        self._widget.setText(path)
 
 
 class Info(String):
@@ -1059,6 +1238,10 @@ class Separator(QArgument):
         self._write = lambda value: None
 
         return widget
+
+    def reset(self):
+        # This ain't got no default value
+        pass
 
 
 class Enum(QArgument):
