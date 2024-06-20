@@ -1,7 +1,13 @@
 import re
+import math
 import types
 import logging
+import platform
 from collections import OrderedDict as odict
+
+# User-controlled, global resolution scale
+# Mostly for Mac which doesn't respect the Qt DPI scale
+ResolutionScale = 1.0
 
 # User-specified style, either write to this directly,
 # or copy it and pass it to QArgumentParser(style=yourStyle)
@@ -15,10 +21,11 @@ DefaultStyle = {
 }
 
 
-__version__ = "0.5.10"
+__version__ = "0.6.0"
 _log = logging.getLogger(__name__)
 _type = type  # used as argument
 _dpi = None
+_ismac = platform.system().lower() == "darwin"
 
 try:
     # Python 2
@@ -26,60 +33,12 @@ try:
 except NameError:
     _basestring = str
 
-
-# Support for both PyQt5 and PySide2
-QtCompat = types.ModuleType("QtCompat")
-
-try:
-    from PySide2 import (
-        QtWidgets,
-        QtCore,
-        QtGui,
-    )
-
-    from shiboken2 import wrapInstance, getCppPointer
-    QtCompat.wrapInstance = wrapInstance
-    QtCompat.getCppPointer = getCppPointer
-
-    try:
-        from PySide2 import QtUiTools
-        QtCompat.loadUi = QtUiTools.QUiLoader
-
-    except ImportError:
-        _log.debug("QtUiTools not provided.")
-
-
-except ImportError:
-    try:
-        from PyQt5 import (
-            QtWidgets,
-            QtCore,
-            QtGui,
-        )
-
-        QtCore.Signal = QtCore.pyqtSignal
-        QtCore.Slot = QtCore.pyqtSlot
-        QtCore.Property = QtCore.pyqtProperty
-
-        from sip import wrapinstance, unwrapinstance
-        QtCompat.wrapInstance = wrapinstance
-        QtCompat.getCppPointer = unwrapinstance
-
-        try:
-            from PyQt5 import uic
-            QtCompat.loadUi = uic.loadUi
-        except ImportError:
-            _log.debug("uic not provided.")
-
-    except ImportError:
-        _log.error(
-            "Could not find either the required PySide2 or PyQt5"
-        )
+from .Qt import QtWidgets, QtCore, QtGui, QtCompat
 
 
 _stylesheet = """\
 QWidget {
-    font-size: 8pt;
+    font-size: 10px;
 }
 
 *[type="Button"] {
@@ -91,21 +50,30 @@ QWidget {
     border: none;
 }
 
+*[type="Image"], *[type="ImageButton"] {
+    border: 1px solid #555;
+    background: #222;
+}
+
+*[type="ImageButton"]:hover {
+    background: #2A2A2A;
+}
+
+*[type="ImageButton"]:pressed {
+    background: #333;
+}
+
 QLabel[type="Separator"] {
     min-height: 20px;
     text-decoration: underline;
 }
 
-QWidget[type="QArgparse:reset"] {
-    /* Ensure size fixed */
-    max-width: 11px;
-    max-height: 11px;
-    min-width: 11px;
-    min-height: 11px;
+QWidget #resetButton {
     padding-top: 0px;
     padding-bottom: 0px;
     padding-left: 0px;
     padding-right: 0px;
+    background: transparent;
 }
 
 #description, #icon {
@@ -119,6 +87,16 @@ def px(value):
     """Return a scaled value, for HDPI resolutions"""
 
     global _dpi
+
+    if not _dpi:
+        try:
+            # Autodesk Maya has a special utility
+            # function this this occasion.
+            from maya.OpenMayaUI import MQtUtil
+            _dpi = MQtUtil.dpiScale(1.0)
+
+        except ImportError:
+            pass
 
     if not _dpi:
         # We can get system DPI from a window handle,
@@ -140,7 +118,7 @@ def px(value):
         # Store for later
         _dpi = scale
 
-    return value * _dpi
+    return value * _dpi * ResolutionScale
 
 
 def _scaled_stylesheet():
@@ -182,6 +160,10 @@ class QArgumentParser(QtWidgets.QWidget):
     entered = QtCore.Signal(QtCore.QObject)
     exited = QtCore.Signal(QtCore.QObject)
 
+    help_wanted = QtCore.Signal()
+    help_entered = QtCore.Signal()
+    help_exited = QtCore.Signal()
+
     def __init__(self,
                  arguments=None,
                  description=None,
@@ -210,11 +192,14 @@ class QArgumentParser(QtWidgets.QWidget):
         )
 
         layout = QtWidgets.QGridLayout(self)
-        layout.setRowStretch(999, 1)
+        layout.setRowStretch(9999, 1)  # Push all options up
+        layout.setColumnStretch(1, 1)
 
-        icon = QtWidgets.QLabel()
-        description = QtWidgets.QLabel(description or "")
-        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignHCenter)
+        Label = _with_entered_exited2(QtWidgets.QLabel)
+        icon = Label()
+        description = Label(description or "")
+        description.setWordWrap(True)
+        layout.addWidget(icon, 0, 0, 1, 1, QtCore.Qt.AlignRight)
         layout.addWidget(description, 0, 1, 1, 1, QtCore.Qt.AlignVCenter)
 
         # Shown when set
@@ -223,7 +208,14 @@ class QArgumentParser(QtWidgets.QWidget):
 
         # For CSS
         icon.setObjectName("icon")
+        icon.entered.connect(self.help_entered.emit)
+        icon.exited.connect(self.help_exited.emit)
+        icon.setCursor(QtCore.Qt.PointingHandCursor)
+
         description.setObjectName("description")
+        description.entered.connect(self.help_entered.emit)
+        description.exited.connect(self.help_exited.emit)
+        description.setCursor(QtCore.Qt.PointingHandCursor)
 
         self._row = 1
         self._storage = storage
@@ -241,6 +233,14 @@ class QArgumentParser(QtWidgets.QWidget):
                            QtWidgets.QSizePolicy.MinimumExpanding)
 
         self.setStyleSheet(_scaled_stylesheet())
+
+    def mouseReleaseEvent(self, event):
+        widget = self.childAt(event.pos())
+
+        if widget and widget.objectName() in ("icon", "description"):
+            self.help_wanted.emit()
+
+        super(QArgumentParser, self).mouseReleaseEvent(event)
 
     def __iter__(self):
         """Make parser iterable
@@ -329,33 +329,55 @@ class QArgumentParser(QtWidgets.QWidget):
                 arg["default"] = default
 
         # Argument label and editor widget
-        label = QtWidgets.QLabel(arg["label"])
+        label = _with_entered_exited2(QtWidgets.QLabel)(arg["label"])
+
+        # Take condition into account
+        if arg["condition"]:
+            arg["enabled"] = arg["condition"]()
 
         if isinstance(arg, Enum):
             widget = arg.create(fillWidth=self._style["comboboxFillWidth"])
         else:
             widget = arg.create()
 
-        for widget in (label, widget):
-            widget.setObjectName(arg["name"])  # useful in CSS
-            widget.setProperty("type", type(arg).__name__)
-            widget.setAttribute(QtCore.Qt.WA_StyledBackground)
-            widget.setEnabled(arg["enabled"])
+        if self._style.get("useTooltip"):
+            label.setToolTip(arg["help"])
+            widget.setToolTip(arg["help"])
 
-            if self._style.get("useTooltip"):
-                widget.setToolTip(arg["help"])
+        widget.setObjectName(arg["name"])  # useful in CSS
+        widget.setAttribute(QtCore.Qt.WA_StyledBackground)
+        widget.setEnabled(arg["enabled"])
+        widget.setProperty("type", type(arg).__name__)
+
+        def base64_to_pixmap(base64):
+            data = QtCore.QByteArray.fromBase64(base64)
+            pixmap = QtGui.QPixmap()
+            pixmap.loadFromData(data)
+            return pixmap
 
         # Reset btn widget
+        reset_icon = QtGui.QIcon(base64_to_pixmap(_reset_icon))
         reset_container = QtWidgets.QWidget()
-        reset_container.setProperty("type", "QArgparse:reset")
+        reset_container.setFixedSize(px(12), px(12))
         reset = QtWidgets.QPushButton("")  # default
+        reset.setObjectName("resetButton")
+        reset.setIcon(reset_icon)
+        reset.setIconSize(QtCore.QSize(px(12), px(12)))
         reset.setToolTip(arg.compose_reset_tip())
         reset.hide()  # shown on edit
+
+        # Internal
+        arg["_widget"] = widget
+        arg["_reset"] = reset
 
         # Align label on top of row if widget is over two times higher
         height = (lambda w: w.sizeHint().height())
         label_on_top = height(label) * 2 < height(widget)
-        alignment = (QtCore.Qt.AlignTop,) if label_on_top else ()
+
+        if label_on_top:
+            alignment = (QtCore.Qt.AlignRight | QtCore.Qt.AlignTop,)
+        else:
+            alignment = (QtCore.Qt.AlignRight,)
 
         # Layout
         layout = QtWidgets.QVBoxLayout(reset_container)
@@ -370,31 +392,45 @@ class QArgumentParser(QtWidgets.QWidget):
         # |_________|_________________________|_______|
         #
 
+        # Checkboxes have their own label to the right
         if not isinstance(arg, Boolean):
-            # Checkboxes have their own label to the right
-            layout.addWidget(label, self._row, 0, QtCore.Qt.AlignRight)
+            layout.addWidget(label, self._row, 0, *alignment)
 
         layout.addWidget(widget, self._row, 1)
         layout.addWidget(reset_container, self._row, 2, *alignment)
-        layout.setColumnStretch(1, 1)
 
         # Packed tightly on the vertical
         layout.setHorizontalSpacing(px(10))
         layout.setVerticalSpacing(px(2))
 
         # Signals
-        reset.pressed.connect(lambda: arg.write(arg["default"]))
+        def _reset():
+            arg.write(arg["default"])
 
-        # Prevent button from getting stuck in down-state, since
-        # it is hidden right after having been pressed
-        reset.pressed.connect(lambda: reset.setDown(False))
+            # Prevent button from getting stuck in down-state, since
+            # it is hidden right after having been pressed
+            reset.setDown(False)
+
+        reset.pressed.connect(_reset)
 
         arg.changed.connect(lambda: self.on_changed(arg))
         arg.entered.connect(lambda: self.on_entered(arg))
         arg.exited.connect(lambda: self.on_exited(arg))
+        label.entered.connect(lambda: self.on_entered(arg))
+        label.exited.connect(lambda: self.on_exited(arg))
 
         # Take ownership for clean deletion alongside parser
         arg.setParent(self)
+
+        def setVisible(value):
+            label.setVisible(value)
+            widget.setVisible(value)
+            reset_container.setVisible(value)
+
+        arg.setVisible = setVisible
+
+        if not arg["visible"]:
+            arg.setVisible(False)
 
         self._row += 1
         self._arguments[arg["name"]] = arg
@@ -413,9 +449,32 @@ class QArgumentParser(QtWidgets.QWidget):
 
     def on_changed(self, arg):
         reset = self._resets[arg["name"]]
-        reset.setVisible(arg.isEdited())
+        reset.setVisible(arg.isEdited() and arg["enabled"] and arg["editable"])
 
         arg["edited"] = arg.isEdited()
+
+        if arg["edited"]:
+            arg["_widget"].setStyleSheet("""\
+                QLabel,
+                QCheckBox,
+                QComboBox,
+                QDoubleSpinBox,
+                QSpinBox {
+                    font-weight: bold
+                }
+            """)
+        else:
+            arg["_widget"].setStyleSheet(None)
+
+        # Conditions may have changed
+        for other in self._arguments.values():
+            if other["condition"]:
+                other["enabled"] = other["condition"]()
+                other["_widget"].setEnabled(other["enabled"])
+                other["_reset"].setEnabled(other["enabled"])
+
+        arg["_widget"].setEnabled(arg["enabled"])
+
         self.changed.emit(arg)
 
     def on_entered(self, arg):
@@ -458,7 +517,12 @@ class QArgument(QtCore.QObject):
         args["min"] = kwargs.pop("min", 0)
         args["max"] = kwargs.pop("max", 99)
         args["enabled"] = bool(kwargs.pop("enabled", True))
+        args["editable"] = bool(kwargs.pop("editable", True))
         args["edited"] = False
+        args["condition"] = None
+        args["placeholder"] = kwargs.pop("placeholder", None)
+        args["visible"] = kwargs.pop("visible", True)
+        args["stepsize"] = kwargs.pop("stepsize", 1.0)
 
         # Anything left is an error
         for arg in kwargs:
@@ -498,9 +562,36 @@ class QArgument(QtCore.QObject):
     def read(self):
         return self._read()
 
-    def write(self, value):
+    def write(self, value, notify=True):
         self._write(value)
-        self.changed.emit()
+
+        if notify:
+            self.changed.emit()
+
+    def reset(self):
+        self.write(self["default"])
+
+    def setEnabled(self, value, notify=True):
+        self["enabled"] = value
+
+        if notify:
+            self.changed.emit()
+
+    def enable(self, notify=True):
+        self.setEnabled(True, notify)
+
+    def disable(self, notify=True):
+        self.setEnabled(False, notify)
+
+    def widget(self):
+        widget = self._data["_widget"]
+
+        # Let the bells chime
+        assert QtCompat.isValid(widget), (
+            "%s was no longer alive" % self["name"]
+        )
+
+        return widget
 
     def compose_reset_tip(self):
         return "Reset%s" % (
@@ -511,12 +602,34 @@ class QArgument(QtCore.QObject):
 def _with_entered_exited(cls, obj):
     """Factory function to append `enterEvent` and `leaveEvent`"""
     class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
         def enterEvent(self, event):
+            self.entered.emit()
             obj.entered.emit()
             return super(WidgetHoverFactory, self).enterEvent(event)
 
         def leaveEvent(self, event):
+            self.exited.emit()
             obj.exited.emit()
+            return super(WidgetHoverFactory, self).leaveEvent(event)
+
+    return WidgetHoverFactory
+
+
+def _with_entered_exited2(cls):
+    """Factory function to append `enterEvent` and `leaveEvent`"""
+    class WidgetHoverFactory(cls):
+        entered = QtCore.Signal()
+        exited = QtCore.Signal()
+
+        def enterEvent(self, event):
+            self.entered.emit()
+            return super(WidgetHoverFactory, self).enterEvent(event)
+
+        def leaveEvent(self, event):
+            self.exited.emit()
             return super(WidgetHoverFactory, self).leaveEvent(event)
 
     return WidgetHoverFactory
@@ -541,7 +654,11 @@ class Boolean(QArgument):
         widget = Widget(self._data["label"])
 
         if isinstance(self, Tristate):
-            self._read = lambda: widget.checkState()
+            def read():
+                return widget.checkState()
+
+            self._read = read
+
             state = {
                 0: QtCore.Qt.Unchecked,
                 1: QtCore.Qt.PartiallyChecked,
@@ -551,7 +668,11 @@ class Boolean(QArgument):
                 "2": QtCore.Qt.Checked,
             }
         else:
-            self._read = lambda: bool(widget.checkState())
+            def read():
+                return widget.checkState() == QtCore.Qt.Checked
+
+            self._read = read
+
             state = {
                 None: QtCore.Qt.Unchecked,
 
@@ -568,8 +689,12 @@ class Boolean(QArgument):
                 "true": QtCore.Qt.Checked,
             }
 
-        self._write = lambda value: widget.setCheckState(state[value])
+        def setcheck(value):
+            widget.setCheckState(state[value])
+
+        self._write = setcheck
         widget.clicked.connect(self.changed.emit)
+        widget.toggled.connect(self.write)
 
         initial = self["initial"]
 
@@ -614,6 +739,12 @@ class FractionSlider(QtWidgets.QSlider):
     def _onValueChanged(self, value):
         self._floatValueChanged.emit(value / float(self.steps))
 
+    def minimum(self):
+        return super(FractionSlider, self).minimum() / self.steps
+
+    def maximum(self):
+        return super(FractionSlider, self).maximum() / self.steps
+
     def setMinimum(self, value):
         super(FractionSlider, self).setMinimum(value * self.steps)
 
@@ -635,26 +766,35 @@ class Number(QArgument):
         if isinstance(self, Float):
             slider = _with_entered_exited(FractionSlider, self)()
             widget = _with_entered_exited(QtWidgets.QDoubleSpinBox, self)()
-            widget.setMinimum(self._data.get("min", 0.0))
-            widget.setMaximum(self._data.get("max", 99.99))
+            default = self._data.get("default", 0.0)
+            widget.setMinimum(-9999)
+            widget.setMaximum(9999)
 
             # Account for small values
-            delta = widget.maximum() - widget.minimum()
+            if "stepsize" in self._data:
+                stepsize = self._data["stepsize"]
+                decimals = abs(int(math.log10(stepsize)))
+            else:
+                delta = widget.maximum() - widget.minimum()
+                stepsize = 0.1 if delta < 10 else 1.0
+                minimum = self._data.get("min", 0.0)
+                decimals = len(str(minimum - int(minimum)).rsplit(".")[-1])
 
-            stepsize = 0.1 if delta < 10 else 1.0
             widget.setSingleStep(stepsize)
+            widget.setDecimals(max(1, decimals))
 
         else:
             slider = _with_entered_exited(QtWidgets.QSlider, self)()
             widget = _with_entered_exited(QtWidgets.QSpinBox, self)()
-            widget.setMinimum(self._data.get("min", 0))
-            widget.setMaximum(self._data.get("max", 99))
+            default = self._data.get("default", 0)
+            widget.setMinimum(-9999)
+            widget.setMaximum(9999)
 
         widget.setMinimumWidth(px(50))
 
         container = QtWidgets.QWidget()
-        slider.setMaximum(widget.maximum())
-        slider.setMinimum(widget.minimum())
+        slider.setMinimum(min(default, self._data.get("min", 0)))
+        slider.setMaximum(max(default, self._data.get("max", 99)))
         slider.setOrientation(QtCore.Qt.Horizontal)
 
         layout = QtWidgets.QHBoxLayout(container)
@@ -684,6 +824,12 @@ class Number(QArgument):
         return container
 
     def on_spinbox_changed(self, value):
+        if value > self._slider.maximum():
+            self._slider.setMaximum(value)
+
+        if value < self._slider.minimum():
+            self._slider.setMinimum(value)
+
         self._slider.setValue(value)
         # Spinbox emits a signal all on its own
 
@@ -814,15 +960,20 @@ class String(QArgument):
         super(String, self).__init__(*args, **kwargs)
         self._previous = None
 
+    def isEdited(self):
+        # There's no reasonable default value for a string
+        return False
+
     def create(self):
         widget = _with_entered_exited(QtWidgets.QLineEdit, self)()
         widget.editingFinished.connect(self.onEditingFinished)
         self._read = lambda: widget.text()
         self._write = lambda value: widget.setText(value)
 
-        if isinstance(self, Info):
+        if isinstance(self, Info) or not self._data.get("editable", True):
             widget.setReadOnly(True)
-        widget.setPlaceholderText(self._data.get("placeholder", ""))
+
+        widget.setPlaceholderText(self._data.get("placeholder") or "")
 
         initial = self["initial"]
 
@@ -841,6 +992,101 @@ class String(QArgument):
         if current != self._previous:
             self._previous = current
             self.changed.emit()
+
+
+class String2(String):
+    """A pair of 2 strings"""
+
+    def isEdited(self):
+        return any(self.read())
+
+    def create(self):
+        a = _with_entered_exited(QtWidgets.QLineEdit, self)()
+        b = _with_entered_exited(QtWidgets.QLineEdit, self)()
+
+        if not self["editable"]:
+            a.setReadOnly(True)
+            b.setReadOnly(True)
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(a)
+        layout.addWidget(b)
+        layout.setSpacing(px(2))
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        a.editingFinished.connect(self.onEditingFinished)
+        b.editingFinished.connect(self.onEditingFinished)
+
+        self._read = lambda: (a.text(), b.text())
+        self._write = lambda value: (a.setText(value[0]), b.setText(value[1]))
+
+        if isinstance(self, Info):
+            a.setReadOnly(True)
+
+        placeholder = self._data.get("placeholder") or ("", "")
+        a.setPlaceholderText(placeholder[0])
+        b.setPlaceholderText(placeholder[1])
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial is not None:
+            self._write(initial)
+            self._previous = initial
+
+        return container
+
+
+class Path(String):
+    """Path type user interface
+
+    Represented by `QtWidgets.QLineEdit` and `QPushButton`
+
+    Arguments:
+
+    """
+
+    browsed = QtCore.Signal()
+
+    def create(self):
+        # Keep the `onEditingFinished` signal
+        widget = super(Path, self).create()
+        widget.setPlaceholderText(r"Click 'Browse' or type in a full path.")
+
+        browse = _with_entered_exited(QtWidgets.QPushButton, self)("Browse")
+        browse.setMaximumHeight(px(22))
+        widget.setMinimumWidth(px(50))
+
+        container = QtWidgets.QWidget()
+
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.addWidget(browse)
+        layout.setSpacing(px(2))
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._slider = browse
+        self._widget = widget
+
+        # Synchonise spinbox with browse
+        browse.clicked.connect(self.browsed.emit)
+
+        self._read = lambda: widget.text()
+        self._write = lambda value: widget.setText(value)
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return container
 
 
 class Info(String):
@@ -1014,7 +1260,7 @@ class Choice(QArgument):
                     )
 
             qindex = model.index(index, 0, QtCore.QModelIndex())
-            smodel.setCurrentIndex(qindex, smodel.ClearAndSelect)
+            smodel.setCurrentIndex(qindex, type(smodel).ClearAndSelect)
             self["current"] = options[index]
 
         def reset(items, default=None):
@@ -1039,6 +1285,184 @@ class Choice(QArgument):
         return widget
 
 
+class ListItem(dict):
+    pass
+
+
+class List(QArgument):
+    def isEdited(self):
+        return False
+
+    def create(self):
+        assert all(isinstance(item, ListItem) for item in self["items"]), (
+            "Items of a List must be of type ListItem"
+        )
+
+        widget = _with_entered_exited(QtWidgets.QListWidget, self)()
+
+        # Containerise to allow for internal changes by the user
+        container = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        def reset(items, current=0):
+            for item in items:
+                qitem = QtWidgets.QListWidgetItem()
+
+                for role, value in item.items():
+                    qitem.setData(role, value)
+
+                widget.addItem(qitem)
+
+            if items:
+                widget.setCurrentRow(current)
+
+        reset(self["items"])
+
+        def read():
+            item = widget.currentItem()
+            if item is not None:
+                return item.text()
+            return ""
+
+        def write(value):
+            item = widget.currentItem()
+            if item is not None:
+                item.setText(value)
+
+        self._read = read
+        self._write = write
+        self._reset = reset
+
+        return container
+
+    def reset(self, items=None, current=0):
+        self["items"][:] = items or []
+        self._reset(items, current)
+
+
+class Table(QArgument):
+    doubleClicked = QtCore.Signal()
+
+    def isEdited(self):
+        return False
+
+    def create(self):
+        model = GenericTreeModel()
+        view = _with_entered_exited(GenericTreeView, self)()
+        view.setIndentation(0)
+        view.setHeaderHidden(True)
+        view.setModel(model)
+
+        def reset(items, header=None, current=None):
+            root_item = GenericTreeModelItem({
+                QtCore.Qt.DisplayRole: header or ("",),
+            })
+
+            current_row = None
+            for row, item in enumerate(items or []):
+                child_item = GenericTreeModelItem(item)
+                root_item.addChild(child_item)
+
+                if current is not None:
+                    other = item.get(QtCore.Qt.DisplayRole, "")
+
+                    if isinstance(other, (tuple, list)):
+                        other = other[0]
+
+                    if current == other:
+                        current_row = row
+
+            # Establish a sensible default
+            model.reset(root_item)
+
+            if current_row is not None:
+                index = model.index(current_row, 0)
+
+                if index.isValid():
+                    sel_model = view.selectionModel()
+                    sel_model.select(
+                        index,
+                        type(selection).ClearAndSelect | type(selection).Rows
+                    )
+                    view.scrollTo(index)
+
+            self.changed.emit()
+
+        reset(self["items"], ("key", "value"))
+
+        def read(role=QtCore.Qt.DisplayRole):
+            index = view.selectionModel().selectedIndexes()
+
+            if not len(index):
+                return ""
+
+            index = index[0]
+            if not index.isValid():
+                return ""
+
+            # Find column 0, in case another column was selected
+            index = model.index(index.row(), 0, index.parent())
+
+            if not index.isValid():
+                return ""
+
+            return index.data(role)
+
+        def write(column, value):
+            return
+            # item = widget.currentItem()
+            # if item is not None:
+            #     item.setText(column, value)
+
+        selection = view.selectionModel()
+        selection.currentChanged.connect(self.onItemChanged)
+        view.doubleClicked.connect(self.onItemDoubleClicked)
+
+        # Containerise to allow for internal changes by the user
+        container = QtWidgets.QWidget()
+        container.setObjectName("Container")
+        layout = QtWidgets.QHBoxLayout(container)
+        layout.addWidget(view, 1)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self._read = read
+        self._write = write
+        self._reset = reset
+        self._model = model
+
+        return container
+
+    def read(self, role=QtCore.Qt.DisplayRole):
+        return self._read(role)
+
+    def reset(self, items=None, header=None, current=None):
+        self["items"][:] = items or []
+        self._reset(items, header, current)
+
+    def setHeader(self, *columns):
+        header = self._widget.headerItem()
+        for index, label in enumerate(columns):
+            header.setText(index, label)
+
+        if columns:
+            self._widget.setHeaderHidden(True)
+        else:
+            self._widget.setHeaderHidden(False)
+
+    def onItemChanged(self, current, previous):
+        # Give selection model a chance to update its selection
+        QtCore.QTimer.singleShot(10, self.changed.emit)
+
+    def onItemDoubleClicked(self):
+        def emit():
+            self.doubleClicked.emit()
+
+        # Give widget a chance to render
+        QtCore.QTimer.singleShot(10, emit)
+
+
 class Separator(QArgument):
     """Visual separator
 
@@ -1052,6 +1476,10 @@ class Separator(QArgument):
 
     """
 
+    def __init__(self, name, **kwargs):
+        super(Separator, self).__init__(name, **kwargs)
+        self._data["editable"] = False
+
     def create(self):
         widget = _with_entered_exited(QtWidgets.QWidget, self)()
 
@@ -1059,6 +1487,140 @@ class Separator(QArgument):
         self._write = lambda value: None
 
         return widget
+
+    def reset(self):
+        # This ain't got no default value
+        pass
+
+
+class Image(QArgument):
+    """An image of sorts
+
+               ________________
+    Thumbnail |                |
+              |                |
+              |                |
+              |                |
+              |________________|
+
+    """
+
+    clicked = QtCore.Signal()
+
+    def __init__(self, name, **kwargs):
+        super(Image, self).__init__(name, **kwargs)
+        self._data["editable"] = False
+
+    def create(self):
+        label = _with_entered_exited(QtWidgets.QLabel, self)()
+        label.setMinimumHeight(px(200))
+        label.setMinimumWidth(px(128))
+
+        self._widget = label
+
+        def _write(pixmap):
+            if not isinstance(pixmap, QtGui.QPixmap):
+                pixmap = QtGui.QPixmap(pixmap)
+            label.setPixmap(pixmap)
+
+        self._read = lambda: None
+        self._write = _write
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return label
+
+    def reset(self):
+        # This ain't got no default value
+        pass
+
+
+# For whatever reason, sizeHint of a QPushButton doesn't
+# respect the minimum of fixed sizes. :/
+class _ImageButton(QtWidgets.QPushButton):
+    def sizeHint(self):
+        return QtCore.QSize(px(200), px(128))
+
+
+class ImageButton(QArgument):
+    """An image of sorts
+
+               ________________
+    Thumbnail |                |
+              |                |
+              |                |
+              |                |
+              |________________|
+
+    """
+
+    clicked = QtCore.Signal()
+
+    def __init__(self, name, **kwargs):
+        super(ImageButton, self).__init__(name, **kwargs)
+        self._data["editable"] = False  # No reset button
+
+    def create(self):
+        button = _with_entered_exited(_ImageButton, self)()
+
+        size = QtCore.QSize(px(200), px(128))
+        button.setIconSize(size)
+        button.setFixedSize(size)
+
+        button.clicked.connect(self.clicked.emit)
+
+        def _write(pixmap):
+            if isinstance(pixmap, QtGui.QIcon):
+                pass
+
+            elif isinstance(pixmap, QtGui.QPixmap):
+                pixmap.scaled(
+                    px(200), px(128),
+                    QtCore.Qt.KeepAspectRatio,
+                    QtCore.Qt.SmoothTransformation
+                )
+                icon = QtGui.QIcon(pixmap)
+
+            else:
+                # Try making whatever this is into a pixmap
+                pixmap = QtGui.QPixmap(pixmap)
+                pixmap.scaled(
+                    px(200), px(128),
+                    QtCore.Qt.KeepAspectRatio,
+                    QtCore.Qt.SmoothTransformation
+                )
+                icon = QtGui.QIcon(pixmap)
+
+            button.setIcon(icon)
+
+        self._widget = button
+        self._read = lambda: None
+        self._write = _write
+        self._size = size
+
+        initial = self["initial"]
+
+        if initial is None:
+            initial = self["default"]
+
+        if initial != self.default:
+            self._write(initial)
+
+        return button
+
+    def pixmap(self):
+        icon = self._widget.icon()
+        return icon.pixmap(self._size)
+
+    def reset(self):
+        # This ain't got no default value
+        pass
 
 
 class Enum(QArgument):
@@ -1109,14 +1671,15 @@ class Enum(QArgument):
                                  QtWidgets.QSizePolicy.Fixed)
             layout.addWidget(widget, 1, QtCore.Qt.AlignLeft)
 
-        self._read = lambda: widget.currentText()
+        self._read = widget.currentIndex
+        self.text = widget.itemText
 
         def _write(value):
             index = None
 
             # Support passing an index directly
-            if isinstance(value, int):
-                index = value
+            if isinstance(value, (float, int)):
+                index = int(value)
 
             else:
                 for idx, val in enumerate(items):
@@ -1127,11 +1690,13 @@ class Enum(QArgument):
             # Be forgiving, as it isn't easy handling an
             # error happening at this level
             if index is None:
-                _log.debug(
+                _log.info(
                     "%r isn't an option for '%s', whose options are '%s'" % (
 
                         # Help the caller understand why this is happening
-                        value, self["name"], "', '".join(self["items"])
+                        value, self["name"], "', '".join(
+                            str(i) for i in self["items"]
+                        )
                     )
                 )
 
@@ -1146,11 +1711,15 @@ class Enum(QArgument):
         if initial is None:
             initial = self["default"]
 
-        if initial is not None and len(items):
+        if initial is not None:
             if isinstance(initial, int):
                 index = initial
                 index = 0 if index > len(items) else index
-                initial = items[index]
+
+                try:
+                    initial = items[index]
+                except IndexError:
+                    initial = ""
             else:
                 # Must be str type. If the default str is not in list, will
                 # fallback to the first item silently.
@@ -1163,9 +1732,9 @@ class Enum(QArgument):
     def isEdited(self):
         default = self["default"]
 
-        # Account for integer defaults
-        if isinstance(default, int):
-            default = self["items"][self["default"]]
+        # Account for string defaults
+        if isinstance(default, _basestring):
+            default = self["items"].index(self["default"])
 
         return self.read() != default
 
@@ -1200,6 +1769,169 @@ def camelToTitle(text):
 
 
 camel_to_title = camelToTitle
+
+
+# Utility classes to avoid having to deal with QTreeWidget
+# which is buggy as heck.
+
+
+class GenericTreeView(QtWidgets.QTreeView):
+    doubleClicked = QtCore.Signal()
+
+    def mouseDoubleClickEvent(self, event):
+        self.doubleClicked.emit()
+        return super(GenericTreeView, self).mouseDoubleClickEvent(event)
+
+
+class GenericTreeModel(QtCore.QAbstractItemModel):
+    """A tree model able to display any number of roles and columns
+
+    Items are of GenericItemModel type.
+
+    """
+
+    def __init__(self, parent=None):
+        super(GenericTreeModel, self).__init__(parent)
+
+        self._rootItem = GenericTreeModelItem()
+
+    def reset(self, root, current=None):
+        """Set a new root item
+
+        Arguments:
+            targets (list): List of { Role : [Col1, Col2] } pairs
+
+        """
+
+        assert isinstance(root, GenericTreeModelItem)
+
+        self.beginResetModel()
+        self._rootItem = root
+        self.endResetModel()
+
+        return True
+
+    def data(self, index, role):
+        if not index.isValid():
+            return None
+
+        item = index.internalPointer()
+
+        try:
+            column = item.data(role)
+
+            # Passed as either single-value or tuple of columns
+            # (column1, column2, column3, ...)
+            if isinstance(column, (tuple, list)):
+                return column[index.column()]
+            elif index.column() == 0:
+                return column
+
+        except (KeyError, IndexError):
+            pass
+
+    def headerData(self, section, orientation, role):
+        if role != QtCore.Qt.DisplayRole:
+            return None
+
+        if orientation == QtCore.Qt.Horizontal:
+            return self._rootItem.data(QtCore.Qt.DisplayRole)[section]
+
+    def index(self, row, column, parent=QtCore.QModelIndex()):
+        if not self.hasIndex(row, column, parent):
+            return QtCore.QModelIndex()
+
+        if not parent.isValid():
+            parentItem = self._rootItem
+        else:
+            parentItem = parent.internalPointer()
+
+        childItem = parentItem.child(row)
+        if childItem:
+            return self.createIndex(row, column, childItem)
+        else:
+            return QtCore.QModelIndex()
+
+    def parent(self, index):
+        if not index.isValid():
+            return QtCore.QModelIndex()
+
+        childItem = index.internalPointer()
+        parentItem = childItem.parent()
+
+        if parentItem == self._rootItem:
+            return QtCore.QModelIndex()
+
+        return self.createIndex(parentItem.row(), 0, parentItem)
+
+    def rowCount(self, parent=QtCore.QModelIndex()):
+        if parent.column() > 0:
+            return 0
+
+        if not parent.isValid():
+            parentItem = self._rootItem
+        else:
+            parentItem = parent.internalPointer()
+
+        return parentItem.childCount()
+
+    def columnCount(self, parent=QtCore.QModelIndex()):
+        return len(self._rootItem.data(QtCore.Qt.DisplayRole))
+
+
+class GenericTreeModelItem(object):
+    """An item for the GenericTreeModel
+
+    Items take `data` in the form:
+
+    {
+        role: column0
+    }
+
+    For multiple columns, pass value as tuple.
+
+    {
+        role: (column0, column1, ...)
+    }
+
+    """
+
+    def __init__(self, data=None, parent=None):
+        self._data = data or {
+            # Role                 # Columns
+            QtCore.Qt.DisplayRole: ("key", "value")
+        }
+
+        self._children = list()
+        self._parent = parent
+
+    def __hash__(self):
+        return "%x" % id(self)
+
+    def data(self, role):
+        return self._data.get(role)
+
+    def hasData(self, role):
+        return role in self._data
+
+    def addChild(self, child):
+        child._parent = self
+        self._children.append(child)
+
+    def childCount(self):
+        return len(self._children)
+
+    def child(self, row):
+        return self._children[row]
+
+    def parent(self):
+        return self._parent
+
+    def row(self):
+        if self._parent:
+            return self._parent._children.index(self)
+        else:
+            return 0
 
 
 def _demo():
@@ -1247,3 +1979,6 @@ if __name__ == '__main__':
 
     if opts.version:
         print(__version__)
+
+
+_reset_icon = b"iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAACXBIWXMAABYlAAAWJQFJUiTwAAAAGXRFWHRTb2Z0d2FyZQBBZG9iZSBJbWFnZVJlYWR5ccllPAAAAhpJREFUWIXt2MFLFGEcxvHn1ZI9KBixBnb1oKAsHSJEELt06JIdOnjtYkRKUYEegq6Bp/6JEE8Fhrc9FJSKh7JUrIjw5MGDUkLi7rfD/oRpXdeZ9505FPPcdt/3feaz7+wOMyvlyZPn347zXQick3RT0jVJJUndktolbUv6Kqks6YVzbiNG16KkqnNu0NcTLTsPPAd+cjzVBu/NA/2ndAKQBm4U2LG+CrAAjAMDQJvNKQCXgGngm809AKaAlsyAdoCjHXoN9MVYcxa4D/yydXNAIXUg8NA6DoFJj/X9kd1cAYqpAYGrBqsAY14ltZ5u4JNZVoGuYKB9n77Y+qe+uEhf0XB/IUOAE7b2A3AmFGidXfXIEOCmrb2RBq4J0hu4BLzjhMtDisiwX3EA4j0J0qgj9Z2pSzXB3DeZKfLkySp2mYmbpSwMJ/6KASfpcoKu/XBOggCuboc+AxcyOE6rXS/LvsAq8DErJHDLutdDgMUskEAbsG69d7yB9jp1JPDM+tawRwZvYAPkGnAxAHfbzs4BMORTcAwYQS7b2Heg5NE7Re0OHeBuYlwzoI0VgFkb3wcexTlFQAko27oK8MALdxowMv4Y+G3zfgBPgCtAh81pp/YIei8CA9gGrnvj4gAj8/qAlzR+aK/PLjADdMZ1NP3rA3gr6dA5NxLjA/VIGpM0LKlXUodq94NbklYlLUh65Zzbi4vLkyfP/5A/DV639GAOvUoAAAAASUVORK5CYII="
