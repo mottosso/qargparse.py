@@ -33,7 +33,7 @@ try:
 except NameError:
     _basestring = str
 
-from .Qt import QtWidgets, QtCore, QtGui, QtCompat
+from Qt import QtWidgets, QtCore, QtGui, QtCompat
 
 
 _stylesheet = """\
